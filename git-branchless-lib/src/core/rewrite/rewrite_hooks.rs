@@ -434,6 +434,44 @@ pub fn hook_register_extra_post_rewrite_hook() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Restore the original author and committer timestamps after an on-disk pick or
+/// merge. Git's `cdate_is_adate` option does not preserve the committer date.
+pub fn hook_preserve_commit_timestamps(original_commit_oid: NonZeroOid) -> eyre::Result<()> {
+    let repo = Repo::from_current_dir()?;
+    let original_commit = repo.find_commit_or_fail(original_commit_oid)?;
+    let head_oid = repo
+        .get_head_info()?
+        .oid
+        .ok_or_else(|| eyre::eyre!("No HEAD commit while preserving timestamps"))?;
+    let head_commit = repo.find_commit_or_fail(head_oid)?;
+    let tree = head_commit.get_tree()?;
+    let parents = head_commit.get_parents();
+    let message = head_commit.get_message_raw();
+    let message = std::str::from_utf8(message.as_ref())
+        .wrap_err("Reading the rewritten commit message")?;
+
+    let rewritten_oid = repo.create_commit(
+        None,
+        &original_commit.get_author(),
+        &original_commit.get_committer(),
+        message,
+        &tree,
+        parents.iter().collect(),
+    )?;
+    if rewritten_oid != head_oid {
+        repo.set_head(rewritten_oid)?;
+    }
+
+    // Override the sequencer's intermediate mapping so post-rewrite moves
+    // branches to the commit with the correct timestamps.
+    add_rewritten_list_entries(
+        &repo.get_tempfile_dir()?,
+        &repo.get_rebase_state_dir_path().join("rewritten-list"),
+        &[(original_commit_oid, rewritten_oid)],
+    )?;
+    Ok(())
+}
+
 /// For rebases, detect empty commits (which have probably been applied
 /// upstream) and write them to the `rewritten-list` file, so that they're later
 /// passed to the `post-rewrite` hook.

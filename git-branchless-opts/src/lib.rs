@@ -237,6 +237,12 @@ pub enum HookSubcommand {
         transaction_state: String,
     },
     /// Internal use.
+    PreserveCommitTimestamps {
+        /// The original commit whose timestamps should be retained.
+        #[clap(value_parser)]
+        original_commit_oid: String,
+    },
+    /// Internal use.
     RegisterExtraPostRewriteHook,
     /// Internal use.
     SkipUpstreamAppliedCommit {

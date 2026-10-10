@@ -38,8 +38,8 @@ use lib::git::{CategorizedReferenceName, MaybeZeroOid, NonZeroOid, ReferenceName
 
 use lib::core::effects::Effects;
 pub use lib::core::rewrite::rewrite_hooks::{
-    hook_drop_commit_if_empty, hook_post_rewrite, hook_register_extra_post_rewrite_hook,
-    hook_skip_upstream_applied_commit,
+    hook_drop_commit_if_empty, hook_post_rewrite, hook_preserve_commit_timestamps,
+    hook_register_extra_post_rewrite_hook, hook_skip_upstream_applied_commit,
 };
 
 /// Handle Git's `post-checkout` hook.
@@ -659,6 +659,11 @@ pub fn command_main(ctx: CommandContext, args: HookArgs) -> EyreExitOr<()> {
 
         HookSubcommand::ReferenceTransaction { transaction_state } => {
             hook_reference_transaction(&effects, &transaction_state)?;
+        }
+
+        HookSubcommand::PreserveCommitTimestamps { original_commit_oid } => {
+            let original_commit_oid: NonZeroOid = original_commit_oid.parse()?;
+            hook_preserve_commit_timestamps(original_commit_oid)?;
         }
 
         HookSubcommand::RegisterExtraPostRewriteHook => {

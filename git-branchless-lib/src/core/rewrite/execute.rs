@@ -1099,14 +1099,39 @@ mod on_disk {
             eyre::bail!("Not implemented: replacing commits in an on disk rebase");
         }
 
+        let mut todo_commands = Vec::new();
+        for command in &rebase_plan.commands {
+            let rebase_command = command.to_rebase_command();
+            if !rebase_command.is_empty() {
+                todo_commands.push(rebase_command);
+            }
+            if *preserve_timestamps {
+                let original_commit_oid = match command {
+                    RebaseCommand::Pick {
+                        original_commit_oid,
+                        commits_to_apply_oids: _,
+                    } => Some(original_commit_oid),
+                    RebaseCommand::Merge {
+                        commit_oid,
+                        commits_to_merge: _,
+                    } => Some(commit_oid),
+                    _ => None,
+                };
+                if let Some(original_commit_oid) = original_commit_oid {
+                    todo_commands.push(format!(
+                        "exec git branchless hook-preserve-commit-timestamps {original_commit_oid}"
+                    ));
+                }
+            }
+        }
+
         let todo_file_path = rebase_state_dir.join("git-rebase-todo");
         #[allow(clippy::format_collect)]
         std::fs::write(
             &todo_file_path,
-            rebase_plan
-                .commands
+            todo_commands
                 .iter()
-                .map(|command| format!("{}\n", command.to_rebase_command()))
+                .map(|command| format!("{command}\n"))
                 .collect::<String>(),
         )
         .wrap_err_with(|| {
@@ -1119,7 +1144,7 @@ mod on_disk {
         let end_file_path = rebase_state_dir.join("end");
         std::fs::write(
             end_file_path.as_path(),
-            format!("{}\n", rebase_plan.commands.len()),
+            format!("{}\n", todo_commands.len()),
         )
         .wrap_err_with(|| format!("Writing `end` to: {:?}", end_file_path.as_path()))?;
 
@@ -1132,16 +1157,6 @@ mod on_disk {
                 &keep_redundant_commits_file_path
             )
         })?;
-
-        if *preserve_timestamps {
-            let cdate_is_adate_file_path = rebase_state_dir.join("cdate_is_adate");
-            std::fs::write(&cdate_is_adate_file_path, "").wrap_err_with(|| {
-                format!(
-                    "Writing `cdate_is_adate` option file to: {:?}",
-                    &cdate_is_adate_file_path
-                )
-            })?;
-        }
 
         // Make sure we don't move around the current branch unintentionally. If it
         // actually needs to be moved, then it will be moved as part of the

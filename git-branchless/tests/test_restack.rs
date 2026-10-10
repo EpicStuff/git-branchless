@@ -680,9 +680,9 @@ fn test_restack_multiple_amended_auto_print() -> eyre::Result<()> {
         |
         o 22f3928 test2 amended
         |
-        o 8e06b96 test3 amended
+        o 2fdee37 test3 amended
         |
-        o f5644e3 create test4.txt
+        o 772b150 create test4.txt
         ");
     }
 
@@ -1178,6 +1178,82 @@ fn test_restack_non_observed_branch_commit_auto_print() -> eyre::Result<()> {
         ");
     }
 
+    Ok(())
+}
+
+
+#[test]
+fn test_restack_on_disk_preserves_distinct_timestamps() -> eyre::Result<()> {
+    use std::collections::HashMap;
+
+    let git = make_git()?;
+    git.init_repo()?;
+    git.detach_head()?;
+    git.commit_file("parent", 1)?;
+    git.write_file_txt("dated", "dated contents\n")?;
+    git.run(&["add", "."])?;
+    git.run_with_options(
+        &["commit", "-m", "dated child"],
+        &GitRunOptions {
+            env: HashMap::from([
+                ("GIT_AUTHOR_DATE".into(), "2001-02-03T04:05:06+05:30".into()),
+                ("GIT_COMMITTER_DATE".into(), "2013-04-05T06:07:08-03:00".into()),
+            ]),
+            ..Default::default()
+        },
+    )?;
+    let original_oid = git.run(&["rev-parse", "HEAD"])?.0.trim().to_string();
+    let original_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &original_oid])?.0;
+    git.run(&["branch", "dated"])?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.run(&["commit", "--amend", "-m", "rewritten parent"])?;
+
+    let (stdout, _) = git.branchless("restack", &["--on-disk"])?;
+    assert!(!stdout.contains("No abandoned branches to restack.\n@"));
+    let rewritten_oid = git.run(&["rev-parse", "dated"])?.0.trim().to_string();
+    let rewritten_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &rewritten_oid])?.0;
+    assert_ne!(original_oid, rewritten_oid);
+    assert_eq!(rewritten_dates, original_dates);
+    Ok(())
+}
+
+#[test]
+fn test_restack_on_disk_preserves_merge_timestamps() -> eyre::Result<()> {
+    use std::collections::HashMap;
+
+    let git = make_git()?;
+    git.init_repo()?;
+    git.detach_head()?;
+    let base_oid = git.commit_file("base", 1)?;
+    git.run(&["branch", "side"])?;
+    git.commit_file("mainline", 2)?;
+    git.run(&["branch", "mainline"])?;
+    git.run(&["checkout", "side"])?;
+    git.commit_file("side", 3)?;
+    git.run(&["checkout", "mainline"])?;
+    git.run_with_options(
+        &["merge", "--no-ff", "side", "-m", "dated merge"],
+        &GitRunOptions {
+            env: HashMap::from([
+                ("GIT_AUTHOR_DATE".into(), "2002-03-04T05:06:07+04:00".into()),
+                ("GIT_COMMITTER_DATE".into(), "2014-05-06T07:08:09-04:00".into()),
+            ]),
+            ..Default::default()
+        },
+    )?;
+    let original_oid = git.run(&["rev-parse", "HEAD"])?.0.trim().to_string();
+    let original_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &original_oid])?.0;
+    git.run(&["branch", "merged"])?;
+    git.run(&["checkout", &base_oid.to_string()])?;
+    git.run(&["commit", "--amend", "-m", "rewritten base"])?;
+    git.branchless("restack", &["--on-disk"])?;
+
+    let rewritten_oid = git.run(&["rev-parse", "merged"])?.0.trim().to_string();
+    let rewritten_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &rewritten_oid])?.0;
+    let parents = git.run(&["rev-list", "--parents", "-n", "1", &rewritten_oid])?.0;
+    assert_ne!(original_oid, rewritten_oid);
+    assert_eq!(rewritten_dates, original_dates);
+    assert_eq!(parents.split_whitespace().count(), 3);
     Ok(())
 }
 

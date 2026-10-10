@@ -44,6 +44,57 @@ fn test_restack_amended_commit() -> eyre::Result<()> {
         branchless: running command: <git-executable> rebase --continue
         Finished restacking commits.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_amended_commit_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    git.run(&["checkout", "HEAD^^"])?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt"])?;
+
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        O f777ecc (master) create initial.txt
+        |\
+        | @ 024c35c amend test1.txt
+        |
+        x 62fc20d (rewritten as 024c35ce) create test1.txt
+        |
+        o 96d1c37 create test2.txt
+        |
+        o 70deb1e create test3.txt
+        hint: there is 1 abandoned commit in your commit graph
+        hint: to fix this, run: git restack
+        hint: disable this hint by running: git config --global branchless.hint.smartlogFixAbandoned false
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &["--on-disk"])?;
+        let stdout = remove_rebase_lines(stdout);
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> diff --quiet
+        Calling Git for on-disk rebase...
+        branchless: running command: <git-executable> rebase --continue
+        Finished restacking commits.
+        No abandoned branches to restack.
         O f777ecc (master) create initial.txt
         |
         @ 024c35c amend test1.txt
@@ -51,7 +102,7 @@ fn test_restack_amended_commit() -> eyre::Result<()> {
         o 8cd7de6 create test2.txt
         |
         o b9a0491 create test3.txt
-        "###);
+        ");
     }
 
     Ok(())
@@ -97,6 +148,83 @@ fn test_restack_reparent() -> eyre::Result<()> {
         let (stdout, _stderr) = git.branchless("restack", &["--reparent"])?;
         let stdout = remove_rebase_lines(stdout);
         insta::assert_snapshot!(stdout, @r"
+        Attempting rebase in-memory...
+        [1/2] Committed as: 5acd93e create test2.txt
+        [2/2] Committed as: 7a9000d create test3.txt
+        branchless: processing 2 rewritten commits
+        In-memory rebase succeeded.
+        Finished restacking commits.
+        No abandoned branches to restack.
+        ");
+    }
+
+    // test2 should be identical as before, undoing the test1 amendment
+    // this behavior is similar to `amend --reparent`
+    {
+        let (stdout, _stderr) = git.run(&["show", "--pretty=format:", "5acd93e"])?;
+        insta::assert_snapshot!(stdout, @r"
+        diff --git a/test1.txt b/test1.txt
+        index 68589b4..7432a8f 100644
+        --- a/test1.txt
+        +++ b/test1.txt
+        @@ -1 +1 @@
+        -test1 amended
+        \ No newline at end of file
+        +test1 contents
+        diff --git a/test2.txt b/test2.txt
+        new file mode 100644
+        index 0000000..4e512d2
+        --- /dev/null
+        +++ b/test2.txt
+        @@ -0,0 +1 @@
+        +test2 contents
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_reparent_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    git.run(&["checkout", &test1_oid.to_string()])?;
+    git.write_file_txt("test1", "test1 amended")?;
+    git.run(&["commit", ".", "--amend", "-m", "amend test1.txt"])?;
+
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r"
+        O f777ecc (master) create initial.txt
+        |\
+        | @ 10d9b3e amend test1.txt
+        |
+        x 62fc20d (rewritten as 10d9b3ee) create test1.txt
+        |
+        o 96d1c37 create test2.txt
+        |
+        o 70deb1e create test3.txt
+        hint: there is 1 abandoned commit in your commit graph
+        hint: to fix this, run: git restack
+        hint: disable this hint by running: git config --global branchless.hint.smartlogFixAbandoned false
+        ");
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &["--reparent"])?;
+        let stdout = remove_rebase_lines(stdout);
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: 5acd93e create test2.txt
         [2/2] Committed as: 7a9000d create test3.txt
@@ -168,6 +296,41 @@ fn test_restack_consecutive_rewrites() -> eyre::Result<()> {
         branchless: running command: <git-executable> rebase --continue
         Finished restacking commits.
         No abandoned branches to restack.
+        "###)
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_consecutive_rewrites_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    git.run(&["checkout", "HEAD^^"])?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt v1"])?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt v2"])?;
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &["--on-disk"])?;
+        let stdout = remove_rebase_lines(stdout);
+
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> diff --quiet
+        Calling Git for on-disk rebase...
+        branchless: running command: <git-executable> rebase --continue
+        Finished restacking commits.
+        No abandoned branches to restack.
         O f777ecc (master) create initial.txt
         |
         @ 662b451 amend test1.txt v2
@@ -175,7 +338,7 @@ fn test_restack_consecutive_rewrites() -> eyre::Result<()> {
         o 8e9bbde create test2.txt
         |
         o 9dc6dd0 create test3.txt
-        "###)
+        ")
     }
 
     Ok(())
@@ -199,9 +362,34 @@ fn test_move_abandoned_branch() -> eyre::Result<()> {
         No abandoned commits to restack.
         branchless: processing 1 update: branch master
         Finished restacking branches.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_abandoned_branch_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt v1"])?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt v2"])?;
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &[])?;
+        let stdout = remove_rebase_lines(stdout);
+        insta::assert_snapshot!(stdout, @"
+        No abandoned commits to restack.
+        branchless: processing 1 update: branch master
+        Finished restacking branches.
         :
         @ 662b451 (master) amend test1.txt v2
-        "###);
+        ");
     }
 
     Ok(())
@@ -243,10 +431,53 @@ fn test_amended_initial_commit() -> eyre::Result<()> {
         branchless: running command: <git-executable> rebase --continue
         Finished restacking commits.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_amended_initial_commit_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+    git.run(&["config", "branchless.restack.preserveTimestamps", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.run(&["commit", "--amend", "-m", "new initial commit"])?;
+
+    {
+        // FIXME: there is no topological relationship between the new initial commit and `master`,
+        // so they shouldn't be connected in the smartlog.
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        @ 9a9f929 new initial commit
+        :
+        O 62fc20d (master) create test1.txt
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) =
+            git.branchless("restack", &["--on-disk", "--force-rewrite", "all()"])?;
+        let stdout = remove_rebase_lines(stdout);
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> diff --quiet
+        Calling Git for on-disk rebase...
+        branchless: running command: <git-executable> rebase --continue
+        Finished restacking commits.
+        No abandoned branches to restack.
         @ 9a9f929 new initial commit
         |
         O 6d85943 (master) create test1.txt
-        "###);
+        ");
     }
 
     Ok(())
@@ -278,11 +509,44 @@ fn test_restack_amended_master() -> eyre::Result<()> {
         branchless: running command: <git-executable> rebase --continue
         Finished restacking commits.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_amended_master_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.detach_head()?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.run(&["commit", "--amend", "-m", "amended test1"])?;
+
+    {
+        let (stdout, _stderr) =
+            git.branchless("restack", &["--on-disk", "--force-rewrite", "all()"])?;
+        let stdout = remove_rebase_lines(stdout);
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> diff --quiet
+        Calling Git for on-disk rebase...
+        branchless: running command: <git-executable> rebase --continue
+        Finished restacking commits.
+        No abandoned branches to restack.
         :
         @ ae94dc2 amended test1
         |
         O 51452b5 (master) create test2.txt
-        "###);
+        ");
     }
 
     Ok(())
@@ -374,6 +638,42 @@ fn test_restack_multiple_amended() -> eyre::Result<()> {
         branchless: running command: <git-executable> rebase --continue
         Finished restacking commits.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_multiple_amended_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    git.commit_file("test4", 4)?;
+
+    git.run(&["checkout", "HEAD~"])?;
+    git.run(&["commit", "--amend", "-m", "test3 amended"])?;
+    git.run(&["checkout", "HEAD~"])?;
+    git.run(&["commit", "--amend", "-m", "test2 amended"])?;
+    git.run(&["checkout", "HEAD~"])?;
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &["--on-disk"])?;
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> diff --quiet
+        Calling Git for on-disk rebase...
+        branchless: running command: <git-executable> rebase --continue
+        Finished restacking commits.
+        No abandoned branches to restack.
         O f777ecc (master) create initial.txt
         |
         @ 62fc20d create test1.txt
@@ -383,7 +683,7 @@ fn test_restack_multiple_amended() -> eyre::Result<()> {
         o 8e06b96 test3 amended
         |
         o f5644e3 create test4.txt
-        "###);
+        ");
     }
 
     Ok(())
@@ -472,6 +772,73 @@ fn test_restack_single_of_many_commits() -> eyre::Result<()> {
         branchless: running command: <git-executable> rebase --continue
         Finished restacking commits.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_single_of_many_commits_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    git.run(&["checkout", &test1_oid.to_string()])?;
+    let test4_oid = git.commit_file("test4", 4)?;
+    git.commit_file("test5", 5)?;
+
+    git.run(&["checkout", &test2_oid.to_string()])?;
+    git.run(&["commit", "--amend", "-m", "updated test2"])?;
+
+    git.run(&["checkout", &test4_oid.to_string()])?;
+    git.run(&["commit", "--amend", "-m", "updated test4"])?;
+
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |\
+        | @ 3bd716d updated test4
+        |\
+        | o 7357d2b updated test2
+        |\
+        | x 96d1c37 (rewritten as 7357d2b7) create test2.txt
+        | |
+        | o 70deb1e create test3.txt
+        |
+        x bf0d52a (rewritten as 3bd716d5) create test4.txt
+        |
+        o 848121c create test5.txt
+        hint: there are 2 abandoned commits in your commit graph
+        hint: to fix this, run: git restack
+        hint: disable this hint by running: git config --global branchless.hint.smartlogFixAbandoned false
+        "###);
+    }
+
+    {
+        let (stdout, stderr) = git.branchless("restack", &["--on-disk", &test2_oid.to_string()])?;
+        insta::assert_snapshot!(stderr, @r"
+        branchless: processing 1 update: ref HEAD
+        branchless: processing 1 update: ref HEAD
+        Executing: git branchless hook-detect-empty-commit 70deb1e28791d8e7dd5a1f0c871a51b91282562f
+        Executing: git branchless hook-register-extra-post-rewrite-hook
+        branchless: processing 1 rewritten commit
+        branchless: creating working copy snapshot
+        branchless: running command: <git-executable> checkout 3bd716d57489779ab1daf446f80e66e90b56ead7 --
+        Previous HEAD position was 944f78d create test3.txt
+        branchless: processing 1 update: ref HEAD
+        HEAD is now at 3bd716d updated test4
+        branchless: processing checkout
         :
         O 62fc20d (master) create test1.txt
         |\
@@ -487,7 +854,30 @@ fn test_restack_single_of_many_commits() -> eyre::Result<()> {
         hint: there is 1 abandoned commit in your commit graph
         hint: to fix this, run: git restack
         hint: disable this hint by running: git config --global branchless.hint.smartlogFixAbandoned false
-        "###);
+        Successfully rebased and updated detached HEAD.
+        ");
+        insta::assert_snapshot!(stdout, @r"
+        branchless: running command: <git-executable> diff --quiet
+        Calling Git for on-disk rebase...
+        branchless: running command: <git-executable> rebase --continue
+        Finished restacking commits.
+        No abandoned branches to restack.
+        :
+        O 62fc20d (master) create test1.txt
+        |\
+        | @ 3bd716d updated test4
+        |\
+        | o 7357d2b updated test2
+        | |
+        | o 944f78d create test3.txt
+        |
+        x bf0d52a (rewritten as 3bd716d5) create test4.txt
+        |
+        o 848121c create test5.txt
+        hint: there is 1 abandoned commit in your commit graph
+        hint: to fix this, run: git restack
+        hint: disable this hint by running: git config --global branchless.hint.smartlogFixAbandoned false
+        ");
     }
 
     Ok(())
@@ -541,11 +931,65 @@ fn test_restack_unobserved_commit() -> eyre::Result<()> {
         insta::assert_snapshot!(stdout, @r###"
         No abandoned commits to restack.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_unobserved_commit_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo_with_options(&GitInitOptions {
+        run_branchless_init: false,
+        ..Default::default()
+    })?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.run(&["checkout", "-b", "foo"])?;
+    git.commit_file("test2", 2)?;
+    git.detach_head()?;
+    git.commit_file("test3", 3)?;
+
+    git.branchless("init", &[])?;
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |
+        o 96d1c37 (foo) create test2.txt
+        |
+        @ 70deb1e create test3.txt
+        "###);
+    }
+
+    // Only abandon `test3` now that it's been observed by the DAG.
+    git.run(&["checkout", "foo"])?;
+
+    git.run(&["commit", "--amend", "-m", "Updated test2"])?;
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
         :
         O 62fc20d (master) create test1.txt
         |
         @ f4229de (> foo) Updated test2
         "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &[])?;
+        insta::assert_snapshot!(stdout, @"
+        No abandoned commits to restack.
+        No abandoned branches to restack.
+        :
+        O 62fc20d (master) create test1.txt
+        |
+        @ f4229de (> foo) Updated test2
+        ");
     }
 
     Ok(())
@@ -575,9 +1019,39 @@ fn test_restack_checked_out_branch() -> eyre::Result<()> {
         In-memory rebase succeeded.
         Finished restacking commits.
         No abandoned branches to restack.
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_checked_out_branch_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.run(&["branch", "foo"])?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.run(&["commit", "--amend", "-m", "test1 amended"])?;
+    git.run(&["checkout", "foo"])?;
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &["-f", "all()"])?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 59e7581 create test2.txt
+        branchless: processing 2 updates: branch foo, branch master
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout foo --
+        In-memory rebase succeeded.
+        Finished restacking commits.
+        No abandoned branches to restack.
         :
         @ 59e7581 (> foo, master) create test2.txt
-        "###);
+        ");
     }
 
     Ok(())
@@ -608,8 +1082,6 @@ fn test_restack_non_observed_branch_commit() -> eyre::Result<()> {
         In-memory rebase succeeded.
         Finished restacking commits.
         No abandoned branches to restack.
-        :
-        @ 59e7581 (> foo, master) create test2.txt
         "###);
     }
 
@@ -639,10 +1111,89 @@ fn test_restack_non_observed_branch_commit() -> eyre::Result<()> {
         No abandoned commits to restack.
         branchless: processing 1 update: branch foo
         Finished restacking branches.
-        :
-        @ 59e7581 (> foo, master) create test2.txt
         "###);
     }
 
+    Ok(())
+}
+
+#[test]
+fn test_restack_non_observed_branch_commit_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.run(&["branch", "foo"])?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.clear_event_log()?;
+    git.run(&["commit", "--amend", "-m", "test1 amended"])?;
+    git.run(&["checkout", "foo"])?;
+
+    {
+        let (stdout, _stderr) = git.branchless("restack", &["-f", "all()"])?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 59e7581 create test2.txt
+        branchless: processing 2 updates: branch foo, branch master
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout foo --
+        In-memory rebase succeeded.
+        Finished restacking commits.
+        No abandoned branches to restack.
+        :
+        @ 59e7581 (> foo, master) create test2.txt
+        ");
+    }
+
+    git.run(&["reset", "--hard", &test2_oid.to_string()])?;
+    {
+        let (stdout, _stderr) = git.run(&["sl"])?;
+        insta::assert_snapshot!(stdout, @r###"
+        O f777ecc create initial.txt
+        |\
+        : x 62fc20d (rewritten as 14042005) create test1.txt
+        : |
+        : % 96d1c37 (rewritten as 59e75818) (> foo) create test2.txt
+        :
+        O 59e7581 (master) create test2.txt
+        "###);
+    }
+
+    {
+        // If we didn't enable `branchless.restack.preserveTimestamps`, then
+        // this would have created another commit and moved `foo` to it. (Below,
+        // it just moves `foo`.) It's not clear what the best behavior here is;
+        // the user might not expect the restack operation to create duplicates
+        // of all descendant commits just because a branch pointed to one of
+        // those descendants.
+        let (stdout, _stderr) = git.branchless("restack", &["-f"])?;
+        insta::assert_snapshot!(stdout, @"
+        No abandoned commits to restack.
+        branchless: processing 1 update: branch foo
+        Finished restacking branches.
+        :
+        @ 59e7581 (> foo, master) create test2.txt
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_auto_print_smartlog_opt_in() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.detach_head()?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.run(&["commit", "--amend", "-m", "amended test1"])?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let (stdout, _) = git.branchless("restack", &[])?;
+    assert!(stdout.contains("Finished restacking commits."));
+    assert!(stdout.lines().any(|line| line.starts_with("@ ")));
     Ok(())
 }

@@ -881,8 +881,6 @@ fn test_undo_noninteractive() -> eyre::Result<()> {
         4. Check out from 9ed8f9a bad message
                        to 96d1c37 create test2.txt
         Confirm? [yN] branchless: running command: <git-executable> checkout master --detach --
-        :
-        @ 96d1c37 (master) create test2.txt
         Applied 4 inverse events.
         "###);
     }
@@ -1005,5 +1003,24 @@ fn test_undo_unseen_commit() -> eyre::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+#[test]
+fn test_undo_auto_print_smartlog_opt_in() -> eyre::Result<()> {
+    let git = make_git()?;
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.branchless("wrap", &["--", "commit", "--amend", "-m", "bad message"])?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let (stdout, _) = git.branchless("undo", &["--yes"])?;
+    assert!(stdout.contains("Applied 4 inverse events."));
+    assert!(stdout.lines().any(|line| line.starts_with("@ ")));
     Ok(())
 }

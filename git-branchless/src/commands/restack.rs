@@ -69,7 +69,7 @@ use tracing::{instrument, warn};
 use git_branchless_opts::{MoveOptions, ResolveRevsetOptions, Revset};
 use git_branchless_revset::resolve_commits;
 use git_branchless_smartlog::smartlog;
-use lib::core::config::get_restack_preserve_timestamps;
+use lib::core::config::{get_restack_preserve_timestamps, get_smartlog_auto_print};
 use lib::core::dag::{CommitSet, Dag, union_all};
 use lib::core::effects::Effects;
 use lib::core::eventlog::{EventCursor, EventLogDb, EventReplayer};
@@ -369,5 +369,9 @@ pub fn restack(
         &execute_options,
     )?);
 
-    smartlog(effects, git_run_info, Default::default())
+    if get_smartlog_auto_print(&repo)? {
+        return smartlog(effects, git_run_info, Default::default());
+    }
+
+    Ok(Ok(()))
 }

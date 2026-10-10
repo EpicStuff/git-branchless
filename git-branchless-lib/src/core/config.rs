@@ -115,6 +115,14 @@ pub fn get_smartlog_reverse(repo: &Repo) -> eyre::Result<bool> {
         .get_or("branchless.smartlog.reverse", false)
 }
 
+/// Whether commands automatically render the smartlog after an operation.
+/// The explicit `git smartlog` command is unaffected.
+#[instrument]
+pub fn get_smartlog_auto_print(repo: &Repo) -> eyre::Result<bool> {
+    repo.get_readonly_config()?
+        .get_or("branchless.smartlog.autoPrint", false)
+}
+
 /// Get the default comment character.
 #[instrument]
 pub fn get_comment_char(repo: &Repo) -> eyre::Result<char> {

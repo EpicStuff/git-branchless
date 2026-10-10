@@ -10,7 +10,7 @@ use eyre::Context;
 use itertools::Itertools;
 use tracing::instrument;
 
-use crate::core::config::get_auto_switch_branches;
+use crate::core::config::{get_auto_switch_branches, get_smartlog_auto_print};
 use crate::git::{
     CategorizedReferenceName, GitRunInfo, MaybeZeroOid, NonZeroOid, ReferenceName, Repo, Stage,
     UpdateIndexCommand, WorkingCopySnapshot, update_index,
@@ -200,7 +200,7 @@ pub fn check_out_commit(
         }
     }
 
-    if *render_smartlog {
+    if *render_smartlog && get_smartlog_auto_print(repo)? {
         try_exit_code!(
             git_run_info.run_direct_no_wrapping(Some(event_tx_id), &["branchless", "smartlog"])?
         );

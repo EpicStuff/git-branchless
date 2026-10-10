@@ -3237,16 +3237,6 @@ fn test_move_branches_after_move() -> eyre::Result<()> {
             insta::assert_snapshot!(stdout, @r###"
             No abandoned commits to restack.
             No abandoned branches to restack.
-            :
-            O 62fc20d create test1.txt
-            |\
-            | o 4838e49 (foo) create test3.txt
-            | |
-            | o a248207 create test4.txt
-            | |
-            | @ 566e434 (bar) create test5.txt
-            |
-            O 96d1c37 (master) create test2.txt
             "###);
         }
     }
@@ -3307,16 +3297,6 @@ fn test_move_branches_after_move() -> eyre::Result<()> {
             insta::assert_snapshot!(stdout, @r###"
             No abandoned commits to restack.
             No abandoned branches to restack.
-            :
-            O 62fc20d create test1.txt
-            |\
-            | o 4838e49 (foo) create test3.txt
-            | |
-            | o a248207 create test4.txt
-            | |
-            | @ 566e434 (> bar) create test5.txt
-            |
-            O 96d1c37 (master) create test2.txt
             "###);
         }
     }

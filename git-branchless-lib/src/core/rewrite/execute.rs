@@ -963,6 +963,7 @@ mod in_memory {
 }
 
 mod on_disk {
+    use std::collections::HashSet;
     use std::fmt::Write;
 
     use eyre::Context;
@@ -972,6 +973,7 @@ mod on_disk {
     use crate::core::rewrite::plan::RebaseCommand;
     use crate::core::rewrite::plan::RebasePlan;
     use crate::core::rewrite::rewrite_hooks::save_original_head_info;
+    use crate::git::config::ConfigRead;
     use crate::git::{GitRunInfo, Repo};
 
     use crate::util::ExitCode;
@@ -1202,9 +1204,36 @@ mod on_disk {
             effects.get_output_stream(),
             "Calling Git for on-disk rebase..."
         )?;
-        match git_run_info.run(effects, Some(*event_tx_id), &["rebase", "--continue"])? {
-            Ok(()) => Ok(Ok(ExitCode::success())),
-            Err(err) => Ok(Ok(err)),
+        let rerere_autoupdate = repo.get_config()?.get_or("rerere.autoupdate", false)?;
+        let mut retried_conflicts = HashSet::new();
+        let mut retry_git_run_info = git_run_info.clone();
+        retry_git_run_info.env.insert("GIT_EDITOR".into(), ":".into());
+        let mut is_retry = false;
+        loop {
+            let run_info = if is_retry { &retry_git_run_info } else { git_run_info };
+            let exit_code =
+                match run_info.run(effects, Some(*event_tx_id), &["rebase", "--continue"])? {
+                    Ok(()) => return Ok(Ok(ExitCode::success())),
+                    Err(exit_code) => exit_code,
+                };
+
+            if !rerere_autoupdate || repo.get_index()?.has_conflicts() {
+                return Ok(Ok(exit_code));
+            }
+            let stopped_sha_path = repo.get_rebase_state_dir_path().join("stopped-sha");
+            let stopped_sha = match std::fs::read_to_string(stopped_sha_path) {
+                Ok(stopped_sha) => stopped_sha,
+                Err(_) => return Ok(Ok(exit_code)),
+            };
+            if !retried_conflicts.insert(stopped_sha) {
+                // A retry made no progress. Avoid looping on hook failures.
+                return Ok(Ok(exit_code));
+            }
+            writeln!(
+                effects.get_output_stream(),
+                "Rerere staged all conflicts; continuing rebase..."
+            )?;
+            is_retry = true;
         }
     }
 }

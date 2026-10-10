@@ -1258,6 +1258,42 @@ fn test_restack_on_disk_preserves_merge_timestamps() -> eyre::Result<()> {
 }
 
 #[test]
+fn test_restack_rerere_autoupdate_continues() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "rerere.enabled", "true"])?;
+    git.run(&["config", "rerere.autoupdate", "true"])?;
+    git.detach_head()?;
+    git.commit_file_with_contents("clash", 1, "base\n")?;
+    git.commit_file_with_contents("clash", 2, "parent\n")?;
+    let child_oid = git.commit_file_with_contents("clash", 3, "child\n")?;
+    git.run(&["branch", "child"])?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.write_file_txt("clash", "amended\n")?;
+    git.run(&["commit", "-a", "--amend", "-m", "amended parent"])?;
+
+    git.branchless_with_options(
+        "restack",
+        &["--on-disk"],
+        &GitRunOptions {
+            expected_exit_code: 1,
+            ..Default::default()
+        },
+    )?;
+    git.write_file_txt("clash", "resolved\n")?;
+    git.run(&["add", "clash.txt"])?;
+    git.run(&["rerere"])?;
+    git.run(&["rebase", "--abort"])?;
+
+    let (stdout, _) = git.branchless("restack", &["--on-disk"])?;
+    assert!(stdout.contains("Rerere staged all conflicts; continuing rebase..."));
+    let rewritten_oid = git.run(&["rev-parse", "child"])?.0.trim().to_string();
+    assert_ne!(rewritten_oid, child_oid.to_string());
+    assert!(!git.get_repo()?.is_rebase_underway()?);
+    Ok(())
+}
+
+#[test]
 fn test_restack_auto_print_smartlog_opt_in() -> eyre::Result<()> {
     let git = make_git()?;
     git.init_repo()?;

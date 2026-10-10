@@ -763,7 +763,7 @@ fn test_restack_single_of_many_commits() -> eyre::Result<()> {
 
     {
         let (stdout, stderr) = git.branchless("restack", &["--on-disk", &test2_oid.to_string()])?;
-        insta::assert_snapshot!(stderr, @r###"
+        insta::assert_snapshot!(stderr, @"
         branchless: processing 1 update: ref HEAD
         branchless: processing 1 update: ref HEAD
         Executing: git branchless hook-detect-empty-commit 70deb1e28791d8e7dd5a1f0c871a51b91282562f
@@ -775,23 +775,8 @@ fn test_restack_single_of_many_commits() -> eyre::Result<()> {
         branchless: processing 1 update: ref HEAD
         HEAD is now at 3bd716d updated test4
         branchless: processing checkout
-        :
-        O 62fc20d (master) create test1.txt
-        |\
-        | @ 3bd716d updated test4
-        |\
-        | o 7357d2b updated test2
-        | |
-        | o 944f78d create test3.txt
-        |
-        x bf0d52a (rewritten as 3bd716d5) create test4.txt
-        |
-        o 848121c create test5.txt
-        hint: there is 1 abandoned commit in your commit graph
-        hint: to fix this, run: git restack
-        hint: disable this hint by running: git config --global branchless.hint.smartlogFixAbandoned false
         Successfully rebased and updated detached HEAD.
-        "###);
+        ");
         insta::assert_snapshot!(stdout, @r###"
         branchless: running command: <git-executable> diff --quiet
         Calling Git for on-disk rebase...

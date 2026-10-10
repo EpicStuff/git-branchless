@@ -40,24 +40,73 @@ fn test_commands() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) = git.branchless("prev", &[])?;
-        insta::assert_snapshot!(stdout, @r###"
-        branchless: running command: <git-executable> checkout master --
-        :
-        @ 3df4b93 (> master) create test.txt
-        |
-        o 73b746c create test2.txt
-        "###);
+        insta::assert_snapshot!(stdout, @"branchless: running command: <git-executable> checkout master --");
     }
 
     {
         let (stdout, _stderr) = git.branchless("next", &[])?;
+        insta::assert_snapshot!(stdout, @"branchless: running command: <git-executable> checkout 73b746ca864a21fc0c3dedbc937eaa9e279b73eb --");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_commands_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+    git.commit_file("test", 1)?;
+    git.detach_head()?;
+    git.commit_file("test2", 2)?;
+
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
-        branchless: running command: <git-executable> checkout 73b746ca864a21fc0c3dedbc937eaa9e279b73eb --
         :
         O 3df4b93 (master) create test.txt
         |
         @ 73b746c create test2.txt
         "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("hide", &["HEAD"])?;
+        insta::assert_snapshot!(stdout, @r###"
+        Hid commit: 73b746c create test2.txt
+        To unhide this 1 commit, run: git undo
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("unhide", &["HEAD"])?;
+        insta::assert_snapshot!(stdout, @r###"
+        Unhid commit: 73b746c create test2.txt
+        To hide this 1 commit, run: git undo
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("prev", &[])?;
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> checkout master --
+        :
+        @ 3df4b93 (> master) create test.txt
+        |
+        o 73b746c create test2.txt
+        ");
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("next", &[])?;
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> checkout 73b746ca864a21fc0c3dedbc937eaa9e279b73eb --
+        :
+        O 3df4b93 (master) create test.txt
+        |
+        @ 73b746c create test2.txt
+        ");
     }
 
     Ok(())
@@ -159,10 +208,32 @@ fn test_index_version_4() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) = git.branchless("switch", &["HEAD"])?;
+        insta::assert_snapshot!(stdout, @"branchless: running command: <git-executable> checkout HEAD --");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_index_version_4_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.run(&["update-index", "--index-version=4"])?;
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
-        branchless: running command: <git-executable> checkout HEAD --
         @ f777ecc (> master) create initial.txt
         "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("switch", &["HEAD"])?;
+        insta::assert_snapshot!(stdout, @"
+        branchless: running command: <git-executable> checkout HEAD --
+        @ f777ecc (> master) create initial.txt
+        ");
     }
 
     Ok(())

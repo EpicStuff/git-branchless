@@ -1362,6 +1362,13 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
         event_log_db.get_transaction_message(original_id)?,
         "restack"
     );
+    // The test repo sets `branchless.restack.preserveTimestamps`, so a failed
+    // timestamp hook must be rerun on `git rebase --continue`.
+    assert!(
+        transaction_id_path
+            .with_file_name("reschedule-failed-exec")
+            .exists()
+    );
 
     git.write_file_txt("first", "resolved first\n")?;
     git.run(&["add", "first.txt"])?;

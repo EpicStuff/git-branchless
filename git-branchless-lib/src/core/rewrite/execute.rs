@@ -1157,6 +1157,19 @@ mod on_disk {
         )
         .wrap_err_with(|| format!("Writing `end` to: {:?}", end_file_path.as_path()))?;
 
+        if *preserve_timestamps {
+            // Corresponds to `--reschedule-failed-exec`. Otherwise, if the
+            // timestamp hook fails, `git rebase --continue` skips it and the
+            // commit keeps the rebase-time committer timestamp.
+            let reschedule_failed_exec_file_path = rebase_state_dir.join("reschedule-failed-exec");
+            std::fs::write(&reschedule_failed_exec_file_path, "").wrap_err_with(|| {
+                format!(
+                    "Writing `reschedule-failed-exec` option file to: {:?}",
+                    &reschedule_failed_exec_file_path
+                )
+            })?;
+        }
+
         // Corresponds to the `--empty=keep` flag. We'll drop the commits later once
         // we find out that they're empty.
         let keep_redundant_commits_file_path = rebase_state_dir.join("keep_redundant_commits");

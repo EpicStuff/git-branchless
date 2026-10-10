@@ -246,6 +246,9 @@ struct ConstraintGraph<'a> {
 
     /// A mapping of commits being fixed up to the commits being absorbed into them.
     fixups: HashMap<NonZeroOid, HashSet<NonZeroOid>>,
+
+    /// The requested parents of each moved commit, in order.
+    parent_oids: HashMap<NonZeroOid, Vec<NonZeroOid>>,
 }
 
 impl<'a> ConstraintGraph<'a> {
@@ -255,6 +258,7 @@ impl<'a> ConstraintGraph<'a> {
             permissions,
             inner: HashMap::new(),
             fixups: HashMap::new(),
+            parent_oids: HashMap::new(),
         }
     }
 
@@ -280,6 +284,7 @@ impl<'a> ConstraintGraph<'a> {
                             .or_default()
                             .insert(*child_oid);
                     }
+                    self.parent_oids.insert(*child_oid, parent_oids.clone());
                 }
 
                 Constraint::FixUpCommit {
@@ -364,7 +369,11 @@ impl<'a> ConstraintGraph<'a> {
     /// of a referred-to commit. This adds enough information to the constraint
     /// graph that it now represents the actual end-state commit graph that we
     /// want to create, not just a list of constraints.
-    fn add_descendant_constraints(&mut self, effects: &Effects) -> eyre::Result<()> {
+    fn add_descendant_constraints(
+        &mut self,
+        effects: &Effects,
+        skip_obsolete_descendants: bool,
+    ) -> eyre::Result<()> {
         let (effects, _progress) = effects.start_operation(OperationType::ConstrainCommits);
         let _effects = effects;
 
@@ -378,6 +387,11 @@ impl<'a> ConstraintGraph<'a> {
                 .collect();
             let descendants = self.dag.query_descendants(commits_to_move.clone())?;
             let descendants = descendants.difference(&commits_to_move);
+            let descendants = if skip_obsolete_descendants {
+                descendants.difference(&self.dag.query_obsolete_commits())
+            } else {
+                descendants
+            };
             let descendants = self.dag.filter_visible_commits(descendants)?;
             let descendant_oids = self.dag.commit_set_to_vec(&descendants)?;
             for descendant_oid in descendant_oids {
@@ -570,6 +584,9 @@ pub struct RebasePlanBuilder<'a> {
     /// with.
     replacement_commits: HashMap<NonZeroOid, NonZeroOid>,
 
+    /// Whether to leave obsolete descendants of moved commits in place.
+    skip_obsolete_descendants: bool,
+
     /// Cache mapping from commit OID to the paths changed in the diff for that
     /// commit. The value is `None` if the commit doesn't have an associated
     /// diff (i.e. is a merge commit).
@@ -733,8 +750,16 @@ impl<'a> RebasePlanBuilder<'a> {
             permissions,
             initial_constraints: Default::default(),
             replacement_commits: Default::default(),
+            skip_obsolete_descendants: false,
             touched_paths_cache: Default::default(),
         }
+    }
+
+    /// Leave obsolete descendants of moved commits in place rather than
+    /// carrying them along, for when the caller moves their children onto the
+    /// commits which replaced them.
+    pub fn skip_obsolete_descendants(&mut self) {
+        self.skip_obsolete_descendants = true;
     }
 
     #[instrument]
@@ -786,8 +811,19 @@ impl<'a> RebasePlanBuilder<'a> {
                 // applying this commit. Note that parent commits may or may not
                 // be part of the set of commits to rebase (i.e. may or may not
                 // be mentioned in the constraints).
-                let commits_to_merge: Option<Vec<OidOrLabel>> = current_commit
-                    .get_parent_oids()
+                //
+                // Use the parents requested for this commit, such as the new
+                // versions of rewritten parents, when there's one for each of
+                // the commit's parents.
+                let original_parent_oids = current_commit.get_parent_oids();
+                let parent_oids = match state.constraints.parent_oids.get(&current_commit.get_oid())
+                {
+                    Some(parent_oids) if parent_oids.len() == original_parent_oids.len() => {
+                        parent_oids.clone()
+                    }
+                    _ => original_parent_oids,
+                };
+                let commits_to_merge: Option<Vec<OidOrLabel>> = parent_oids
                     .into_iter()
                     .map(|parent_oid| -> Option<OidOrLabel> {
                         let does_parent_commit_need_rebase =
@@ -1176,7 +1212,9 @@ impl<'a> RebasePlanBuilder<'a> {
                 state.constraints.get_constraints_sorted_for_debug(),
             );
         }
-        state.constraints.add_descendant_constraints(&effects)?;
+        state
+            .constraints
+            .add_descendant_constraints(&effects, self.skip_obsolete_descendants)?;
         if *dump_rebase_constraints {
             // For test: don't print to `effects.get_output_stream()`, as it will
             // be suppressed.

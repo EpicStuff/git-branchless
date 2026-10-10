@@ -924,6 +924,16 @@ impl EventReplayer {
         self.id_counter += 1;
 
         match &event {
+            // A commit rewritten into itself, such as an unchanged commit
+            // which a rebase picked again, didn't change. Recording it would
+            // hide an earlier rewrite of the commit.
+            Event::RewriteEvent {
+                timestamp: _,
+                event_tx_id: _,
+                old_commit_oid,
+                new_commit_oid,
+            } if old_commit_oid == new_commit_oid => {}
+
             Event::RewriteEvent {
                 timestamp: _,
                 event_tx_id: _,

@@ -55,9 +55,11 @@
 //! o def003 Commit 3
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 use std::time::SystemTime;
+
+use itertools::Itertools;
 
 use lib::core::check_out::CheckOutCommitOptions;
 use lib::core::repo_ext::RepoExt;
@@ -105,38 +107,24 @@ fn restack_commits(
     // large and we'll be throwing away most of them.
     let commits = dag.commit_set_to_vec(&commit_set)?;
 
-    struct RebaseInfo {
-        dest_oid: NonZeroOid,
-        abandoned_child_oids: Vec<NonZeroOid>,
-    }
-    let rebases: Vec<RebaseInfo> = {
-        let mut result = Vec::new();
-        for original_commit_oid in commits {
-            let abandoned_children =
-                find_abandoned_children(dag, event_replayer, event_cursor, original_commit_oid)?;
-            if let Some((rewritten_oid, abandoned_child_oids)) = abandoned_children {
-                result.push(RebaseInfo {
-                    dest_oid: rewritten_oid,
-                    abandoned_child_oids,
-                });
-            }
+    // Map each rewritten commit to its newest version, and collect the
+    // abandoned children of the rewritten commits.
+    let mut rewritten_oids: HashMap<NonZeroOid, NonZeroOid> = HashMap::new();
+    let mut abandoned_child_oids: BTreeSet<NonZeroOid> = BTreeSet::new();
+    for original_commit_oid in commits {
+        let abandoned_children =
+            find_abandoned_children(dag, event_replayer, event_cursor, original_commit_oid)?;
+        if let Some((rewritten_oid, child_oids)) = abandoned_children {
+            rewritten_oids.insert(original_commit_oid, rewritten_oid);
+            abandoned_child_oids.extend(child_oids);
         }
-        result
-    };
+    }
 
     let rebase_plan = {
         let permissions = match RebasePlanPermissions::verify_rewrite_set(
             dag,
             build_options,
-            &rebases
-                .iter()
-                .flat_map(
-                    |RebaseInfo {
-                         dest_oid: _,
-                         abandoned_child_oids,
-                     }| abandoned_child_oids.iter().copied(),
-                )
-                .collect(),
+            &abandoned_child_oids.iter().copied().collect(),
         )? {
             Ok(permissions) => permissions,
             Err(err) => {
@@ -145,16 +133,26 @@ fn restack_commits(
             }
         };
         let mut builder = RebasePlanBuilder::new(dag, permissions);
-        for RebaseInfo {
-            dest_oid,
-            abandoned_child_oids,
-        } in rebases
-        {
-            for child_oid in abandoned_child_oids {
-                builder.move_subtree(child_oid, vec![dest_oid])?;
-                if reparent {
-                    builder.reparent_commit(child_oid, vec![dest_oid], &repo)?;
-                }
+        // The children of obsolete descendants are moved onto the newest
+        // versions of those descendants, so don't carry them along too.
+        builder.skip_obsolete_descendants();
+        for child_oid in abandoned_child_oids {
+            // Move the child onto the newest version of each of its rewritten
+            // parents, keeping its other parents (for merge commits).
+            let parent_oids = repo
+                .find_commit_or_fail(child_oid)?
+                .get_parent_oids()
+                .into_iter()
+                .map(|parent_oid| {
+                    rewritten_oids
+                        .get(&parent_oid)
+                        .copied()
+                        .unwrap_or(parent_oid)
+                })
+                .collect_vec();
+            builder.move_subtree(child_oid, parent_oids.clone())?;
+            if reparent {
+                builder.reparent_commit(child_oid, parent_oids, &repo)?;
             }
         }
         match builder.build(effects, thread_pool, repo_pool)? {

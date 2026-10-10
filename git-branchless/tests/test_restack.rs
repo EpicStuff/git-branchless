@@ -1507,3 +1507,89 @@ fn test_restack_auto_print_smartlog_opt_in() -> eyre::Result<()> {
     assert!(stdout.lines().any(|line| line.starts_with("@ ")));
     Ok(())
 }
+
+#[test]
+fn test_restack_merge_with_rewritten_parents() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.run(&["checkout", "master"])?;
+    git.detach_head()?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.run(&["checkout", &test1_oid.to_string()])?;
+    git.run(&["merge", "--no-ff", "-m", "merge", &test2_oid.to_string()])?;
+    git.commit_file("test3", 3)?;
+    git.run(&["checkout", &test1_oid.to_string()])?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt"])?;
+    git.run(&["checkout", &test2_oid.to_string()])?;
+    git.run(&["commit", "--amend", "-m", "amend test2.txt"])?;
+
+    git.branchless("restack", &["--merge"])?;
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r"
+        O f777ecc (master) create initial.txt
+        |\
+        | o 024c35c amend test1.txt
+        | |
+        | | & (merge) 4a24a72 amend test2.txt
+        | |/
+        | o 4278d9c merge
+        | |
+        | o 6a5d014 create test3.txt
+        |
+        @ 4a24a72 amend test2.txt
+        & (merge) 4278d9c merge
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_restack_ignores_commit_rewritten_into_itself() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.run(&["checkout", &test1_oid.to_string()])?;
+    git.run(&["commit", "--amend", "-m", "amend test1.txt"])?;
+
+    // Such as when a later rebase picks the old commit again unchanged.
+    git.branchless_with_options(
+        "hook",
+        &["post-rewrite", "rebase"],
+        &GitRunOptions {
+            input: Some(format!("{test1_oid} {test1_oid}\n")),
+            ..Default::default()
+        },
+    )?;
+
+    git.branchless("restack", &[])?;
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @"
+        O f777ecc (master) create initial.txt
+        |
+        @ 024c35c amend test1.txt
+        |
+        o 8cd7de6 create test2.txt
+        ");
+    }
+
+    Ok(())
+}

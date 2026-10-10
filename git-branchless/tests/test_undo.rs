@@ -1053,3 +1053,32 @@ fn test_undo_repeated_keeps_going_back() -> eyre::Result<()> {
     assert_eq!(branches()?, "master\n");
     Ok(())
 }
+
+#[test]
+fn test_undo_declined_does_not_count() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["branch", "first"])?;
+    git.run(&["branch", "second"])?;
+
+    git.branchless_with_options(
+        "undo",
+        &[],
+        &GitRunOptions {
+            expected_exit_code: 1,
+            input: Some("n".to_string()),
+            ..Default::default()
+        },
+    )?;
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(
+        git.run(&["branch", "--format=%(refname:short)"])?.0,
+        "first\nmaster\n"
+    );
+    Ok(())
+}

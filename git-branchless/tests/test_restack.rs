@@ -1444,6 +1444,53 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
     Ok(())
 }
 
+/// One undo must revert a whole manually continued restack, even when an
+/// unrelated command while it was paused splits its events in two.
+#[test]
+fn test_restack_undo_after_unrelated_command_during_pause() -> eyre::Result<()> {
+    let git = make_git()?;
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.detach_head()?;
+    git.write_file_txt("clash", "base\n")?;
+    git.run(&["add", "."])?;
+    git.run(&["commit", "-m", "parent"])?;
+    git.commit_file("independent", 1)?;
+    git.write_file_txt("clash", "child\n")?;
+    git.run(&["commit", "-am", "conflicting child"])?;
+    git.run(&["branch", "stack"])?;
+    git.run(&["checkout", "HEAD~2"])?;
+    git.write_file_txt("clash", "amended\n")?;
+    git.run(&["commit", "-a", "--amend", "-m", "amended parent"])?;
+
+    let head_before = git.run(&["rev-parse", "HEAD"])?.0;
+    let (draft_before, _) = git.branchless("query", &["draft()"])?;
+
+    // The independent commit is restacked before the conflict pauses the rebase.
+    git.branchless_with_options(
+        "restack",
+        &["--on-disk"],
+        &GitRunOptions {
+            expected_exit_code: 1,
+            ..Default::default()
+        },
+    )?;
+    git.run(&["branch", "scratch", "master"])?;
+    git.write_file_txt("clash", "resolved\n")?;
+    git.run(&["add", "clash.txt"])?;
+    git.run(&["rebase", "--continue"])?;
+    assert_ne!(git.branchless("query", &["draft()"])?.0, draft_before);
+
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(git.run(&["rev-parse", "HEAD"])?.0, head_before);
+    assert_eq!(git.branchless("query", &["draft()"])?.0, draft_before);
+    git.run(&["rev-parse", "--verify", "scratch"])?;
+    Ok(())
+}
+
 #[test]
 fn test_restack_auto_print_smartlog_opt_in() -> eyre::Result<()> {
     let git = make_git()?;

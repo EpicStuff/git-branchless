@@ -797,36 +797,39 @@ fn undo_events(
     event_log_db: &mut EventLogDb,
     event_replayer: &EventReplayer,
     event_cursor: EventCursor,
+    only_event_tx_id: Option<EventTransactionId>,
     skip_confirmation: bool,
 ) -> EyreExitOr<()> {
     let now = SystemTime::now();
-    // Record where this undo goes back to, so that a following undo continues
-    // from there instead of undoing this undo.
-    let target_event_id = event_replayer
-        .get_event_before_cursor(event_cursor)
-        .map_or(0, |(event_id, _)| event_id);
-    let event_tx_id =
-        event_log_db.make_transaction_id(now, format!("{UNDO_MESSAGE_PREFIX}{target_event_id}"))?;
     let head_info = repo.get_head_info()?;
-    let inverse_events: Vec<Event> = event_replayer
-        .get_events_since_cursor(event_cursor)
-        .iter()
-        .rev()
-        .filter(|event| {
-            !matches!(
-                event,
-                Event::RefUpdateEvent {
-                    timestamp: _,
-                    event_tx_id: _,
-                    ref_name,
-                    old_oid: MaybeZeroOid::Zero,
-                    new_oid: _,
-                    message: _,
-                } if ref_name.as_str() == "HEAD"
-            )
-        })
-        .map(|event| inverse_event(event.clone(), now, event_tx_id))
-        .collect::<eyre::Result<Vec<Event>>>()?;
+    let make_inverse_events = |event_tx_id| -> eyre::Result<Vec<Event>> {
+        event_replayer
+            .get_events_since_cursor(event_cursor)
+            .iter()
+            .rev()
+            .filter(|event| {
+                only_event_tx_id
+                    .is_none_or(|only_event_tx_id| event.get_event_tx_id() == only_event_tx_id)
+            })
+            .filter(|event| {
+                !matches!(
+                    event,
+                    Event::RefUpdateEvent {
+                        timestamp: _,
+                        event_tx_id: _,
+                        ref_name,
+                        old_oid: MaybeZeroOid::Zero,
+                        new_oid: _,
+                        message: _,
+                    } if ref_name.as_str() == "HEAD"
+                )
+            })
+            .map(|event| inverse_event(event.clone(), now, event_tx_id))
+            .collect()
+    };
+    // Only create the undo transaction once confirmed, since the next undo
+    // continues from the most recent one.
+    let inverse_events = make_inverse_events(EventTransactionId::Suppressed)?;
 
     if inverse_events.is_empty() {
         writeln!(
@@ -863,6 +866,15 @@ fn undo_events(
         writeln!(effects.get_output_stream(), "Aborted.")?;
         return Ok(Err(ExitCode(1)));
     }
+
+    // Record where this undo goes back to, so that a following undo continues
+    // from there instead of undoing this undo.
+    let target_event_id = event_replayer
+        .get_event_before_cursor(event_cursor)
+        .map_or(0, |(event_id, _)| event_id);
+    let event_tx_id =
+        event_log_db.make_transaction_id(now, format!("{UNDO_MESSAGE_PREFIX}{target_event_id}"))?;
+    let inverse_events = make_inverse_events(event_tx_id)?;
 
     let num_inverse_events = Pluralize {
         determiner: None,
@@ -985,19 +997,18 @@ pub fn undo(
         )?
     };
 
-    let event_cursor = {
+    let (event_cursor, only_event_tx_id) = {
         if interactive {
             let result = with_siv(effects, |effects, siv| {
                 select_past_event(siv, &effects, &repo, &dag, &mut event_replayer)
             })?;
             match result {
-                Some(event_cursor) => event_cursor,
+                Some(event_cursor) => (event_cursor, None),
                 None => return Ok(Ok(())),
             }
         } else {
             // If the last transaction was an undo, keep going back from the
             // state it restored rather than undoing the undo.
-            let mut event_cursor = event_replayer.make_default_cursor();
             let last_undo_target = event_log_db
                 .get_transaction_messages_since_last_event()?
                 .into_iter()
@@ -1006,10 +1017,33 @@ pub fn undo(
                         .strip_prefix(UNDO_MESSAGE_PREFIX)
                         .and_then(|event_id| event_id.parse().ok())
                 });
-            if let Some(event_id) = last_undo_target {
-                event_cursor = event_replayer.make_cursor(event_id);
+            let event_cursor = match last_undo_target {
+                Some(event_id) => event_replayer.make_cursor(event_id),
+                None => event_replayer.make_default_cursor(),
+            };
+
+            // A transaction's events aren't necessarily contiguous (e.g. an
+            // unrelated command while a rebase is paused), so go back to its
+            // first event. A plain undo reverts only that transaction's events,
+            // while a continued undo goes back in time past everything.
+            match event_replayer.get_event_before_cursor(event_cursor) {
+                Some((_, event)) if event.get_event_tx_id() != EventTransactionId::Suppressed => {
+                    let event_tx_id = event.get_event_tx_id();
+                    let first_event_id = event_replayer
+                        .get_events_since_cursor(event_replayer.make_cursor(0))
+                        .iter()
+                        .position(|event| event.get_event_tx_id() == event_tx_id)
+                        .expect("The event before the cursor has this transaction ID");
+                    (
+                        event_replayer.make_cursor(first_event_id.try_into()?),
+                        last_undo_target.is_none().then_some(event_tx_id),
+                    )
+                }
+                _ => (
+                    event_replayer.advance_cursor_by_transaction(event_cursor, -1),
+                    None,
+                ),
             }
-            event_replayer.advance_cursor_by_transaction(event_cursor, -1)
         }
     };
 
@@ -1021,6 +1055,7 @@ pub fn undo(
         &mut event_log_db,
         &event_replayer,
         event_cursor,
+        only_event_tx_id,
         skip_confirmation,
     )?;
     Ok(result)
@@ -1065,6 +1100,7 @@ pub mod testing {
             event_log_db,
             event_replayer,
             event_cursor,
+            None,
             false,
         )
     }

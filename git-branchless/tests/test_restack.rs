@@ -1323,7 +1323,7 @@ fn test_restack_rerere_autoupdate_continues() -> eyre::Result<()> {
 /// manually resumed after multiple conflicts in separate Git processes.
 #[test]
 fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result<()> {
-    use lib::core::eventlog::{EventLogDb, EventTransactionId};
+    use lib::core::eventlog::{Event, EventLogDb, EventTransactionId};
 
     let git = make_git()?;
     if !git.supports_reference_transactions()? {
@@ -1382,6 +1382,11 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
     );
 
     git.write_file_txt("first", "resolved first\n")?;
+    // An unrelated branch created while the rebase is paused must not join the
+    // rebase's transaction.
+    git.run(&["branch", "scratch"])?;
+    let scratch_oid = git.run(&["rev-parse", "scratch"])?.0.trim().to_owned();
+
     git.run(&["add", "first.txt"])?;
     git.run_with_options(
         &["rebase", "--continue"],
@@ -1414,17 +1419,28 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
     // transaction, not to one transaction for each manual continuation.
     let new_events = event_log_db.get_events()?;
     let new_events = &new_events[events_before..];
-    assert!(!new_events.is_empty());
+    let (scratch_events, rebase_events): (Vec<_>, Vec<_>) =
+        new_events.iter().partition(|event| {
+            matches!(event, Event::RefUpdateEvent { ref_name, .. } if ref_name.as_str() == "refs/heads/scratch")
+        });
+    assert!(!rebase_events.is_empty());
     assert!(
-        new_events
+        rebase_events
             .iter()
             .all(|event| event.get_event_tx_id() == original_id)
+    );
+    assert!(!scratch_events.is_empty());
+    assert!(
+        scratch_events
+            .iter()
+            .all(|event| event.get_event_tx_id() != original_id)
     );
 
     // A single undo should restore the complete original stack ref.
     git.branchless("undo", &["--yes"])?;
     let restored_stack = git.run(&["rev-parse", "stack"])?.0.trim().to_owned();
     assert_eq!(restored_stack, original_stack);
+    assert_eq!(git.run(&["rev-parse", "scratch"])?.0.trim(), scratch_oid);
     Ok(())
 }
 

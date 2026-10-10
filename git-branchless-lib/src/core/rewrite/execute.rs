@@ -1029,8 +1029,7 @@ mod on_disk {
 
         // Preserve the transaction for manual rebase continuations, whose hooks
         // do not inherit the original Branchless process environment.
-        let transaction_id_path =
-            rebase_state_dir.join(BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME);
+        let transaction_id_path = rebase_state_dir.join(BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME);
         std::fs::write(&transaction_id_path, event_tx_id.to_string())
             .wrap_err_with(|| format!("Writing transaction ID to: {:?}", transaction_id_path))?;
 
@@ -1212,13 +1211,21 @@ mod on_disk {
             effects.get_output_stream(),
             "Calling Git for on-disk rebase..."
         )?;
-        let rerere_autoupdate = repo.get_readonly_config()?.get_or("rerere.autoupdate", false)?;
+        let rerere_autoupdate = repo
+            .get_readonly_config()?
+            .get_or("rerere.autoupdate", false)?;
         let mut retried_conflicts = HashSet::new();
         let mut retry_git_run_info = git_run_info.clone();
-        retry_git_run_info.env.insert("GIT_EDITOR".into(), ":".into());
+        retry_git_run_info
+            .env
+            .insert("GIT_EDITOR".into(), ":".into());
         let mut is_retry = false;
         loop {
-            let run_info = if is_retry { &retry_git_run_info } else { git_run_info };
+            let run_info = if is_retry {
+                &retry_git_run_info
+            } else {
+                git_run_info
+            };
             let exit_code =
                 match run_info.run(effects, Some(*event_tx_id), &["rebase", "--continue"])? {
                     Ok(()) => return Ok(Ok(ExitCode::success())),

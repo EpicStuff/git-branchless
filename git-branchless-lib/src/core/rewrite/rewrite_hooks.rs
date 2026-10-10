@@ -447,8 +447,8 @@ pub fn hook_preserve_commit_timestamps(original_commit_oid: NonZeroOid) -> eyre:
     let tree = head_commit.get_tree()?;
     let parents = head_commit.get_parents();
     let message = head_commit.get_message_raw();
-    let message = std::str::from_utf8(message.as_ref())
-        .wrap_err("Reading the rewritten commit message")?;
+    let message =
+        std::str::from_utf8(message.as_ref()).wrap_err("Reading the rewritten commit message")?;
 
     let rewritten_oid = repo.create_commit(
         None,

@@ -661,7 +661,9 @@ pub fn command_main(ctx: CommandContext, args: HookArgs) -> EyreExitOr<()> {
             hook_reference_transaction(&effects, &transaction_state)?;
         }
 
-        HookSubcommand::PreserveCommitTimestamps { original_commit_oid } => {
+        HookSubcommand::PreserveCommitTimestamps {
+            original_commit_oid,
+        } => {
             let original_commit_oid: NonZeroOid = original_commit_oid.parse()?;
             hook_preserve_commit_timestamps(original_commit_oid)?;
         }

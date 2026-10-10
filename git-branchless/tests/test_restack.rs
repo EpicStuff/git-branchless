@@ -1181,7 +1181,6 @@ fn test_restack_non_observed_branch_commit_auto_print() -> eyre::Result<()> {
     Ok(())
 }
 
-
 #[test]
 fn test_restack_on_disk_preserves_distinct_timestamps() -> eyre::Result<()> {
     use std::collections::HashMap;
@@ -1197,13 +1196,18 @@ fn test_restack_on_disk_preserves_distinct_timestamps() -> eyre::Result<()> {
         &GitRunOptions {
             env: HashMap::from([
                 ("GIT_AUTHOR_DATE".into(), "2001-02-03T04:05:06+05:30".into()),
-                ("GIT_COMMITTER_DATE".into(), "2013-04-05T06:07:08-03:00".into()),
+                (
+                    "GIT_COMMITTER_DATE".into(),
+                    "2013-04-05T06:07:08-03:00".into(),
+                ),
             ]),
             ..Default::default()
         },
     )?;
     let original_oid = git.run(&["rev-parse", "HEAD"])?.0.trim().to_string();
-    let original_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &original_oid])?.0;
+    let original_dates = git
+        .run(&["show", "-s", "--format=%aI%n%cI", &original_oid])?
+        .0;
     git.run(&["branch", "dated"])?;
     git.run(&["checkout", "HEAD^"])?;
     git.run(&["commit", "--amend", "-m", "rewritten parent"])?;
@@ -1211,7 +1215,9 @@ fn test_restack_on_disk_preserves_distinct_timestamps() -> eyre::Result<()> {
     let (stdout, _) = git.branchless("restack", &["--on-disk"])?;
     assert!(!stdout.contains("No abandoned branches to restack.\n@"));
     let rewritten_oid = git.run(&["rev-parse", "dated"])?.0.trim().to_string();
-    let rewritten_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &rewritten_oid])?.0;
+    let rewritten_dates = git
+        .run(&["show", "-s", "--format=%aI%n%cI", &rewritten_oid])?
+        .0;
     assert_ne!(original_oid, rewritten_oid);
     assert_eq!(rewritten_dates, original_dates);
     Ok(())
@@ -1236,21 +1242,30 @@ fn test_restack_on_disk_preserves_merge_timestamps() -> eyre::Result<()> {
         &GitRunOptions {
             env: HashMap::from([
                 ("GIT_AUTHOR_DATE".into(), "2002-03-04T05:06:07+04:00".into()),
-                ("GIT_COMMITTER_DATE".into(), "2014-05-06T07:08:09-04:00".into()),
+                (
+                    "GIT_COMMITTER_DATE".into(),
+                    "2014-05-06T07:08:09-04:00".into(),
+                ),
             ]),
             ..Default::default()
         },
     )?;
     let original_oid = git.run(&["rev-parse", "HEAD"])?.0.trim().to_string();
-    let original_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &original_oid])?.0;
+    let original_dates = git
+        .run(&["show", "-s", "--format=%aI%n%cI", &original_oid])?
+        .0;
     git.run(&["branch", "merged"])?;
     git.run(&["checkout", &base_oid.to_string()])?;
     git.run(&["commit", "--amend", "-m", "rewritten base"])?;
     git.branchless("restack", &["--on-disk"])?;
 
     let rewritten_oid = git.run(&["rev-parse", "merged"])?.0.trim().to_string();
-    let rewritten_dates = git.run(&["show", "-s", "--format=%aI%n%cI", &rewritten_oid])?.0;
-    let parents = git.run(&["rev-list", "--parents", "-n", "1", &rewritten_oid])?.0;
+    let rewritten_dates = git
+        .run(&["show", "-s", "--format=%aI%n%cI", &rewritten_oid])?
+        .0;
+    let parents = git
+        .run(&["rev-list", "--parents", "-n", "1", &rewritten_oid])?
+        .0;
     assert_ne!(original_oid, rewritten_oid);
     assert_eq!(rewritten_dates, original_dates);
     assert_eq!(parents.split_whitespace().count(), 3);
@@ -1292,7 +1307,6 @@ fn test_restack_rerere_autoupdate_continues() -> eyre::Result<()> {
     assert!(!git.get_repo()?.is_rebase_underway()?);
     Ok(())
 }
-
 
 /// A Branchless on-disk rebase must remain one undo transaction even when
 /// manually resumed after multiple conflicts in separate Git processes.
@@ -1341,9 +1355,13 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
         .get_repo()?
         .get_rebase_state_dir_path()
         .join("branchless_transaction_id");
-    let original_id: EventTransactionId =
-        std::fs::read_to_string(&transaction_id_path)?.trim().parse()?;
-    assert_eq!(event_log_db.get_transaction_message(original_id)?, "restack");
+    let original_id: EventTransactionId = std::fs::read_to_string(&transaction_id_path)?
+        .trim()
+        .parse()?;
+    assert_eq!(
+        event_log_db.get_transaction_message(original_id)?,
+        "restack"
+    );
 
     git.write_file_txt("first", "resolved first\n")?;
     git.run(&["add", "first.txt"])?;
@@ -1355,8 +1373,9 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
         },
     )?;
     assert!(git.get_repo()?.get_index()?.has_conflicts());
-    let continued_id: EventTransactionId =
-        std::fs::read_to_string(&transaction_id_path)?.trim().parse()?;
+    let continued_id: EventTransactionId = std::fs::read_to_string(&transaction_id_path)?
+        .trim()
+        .parse()?;
     assert_eq!(continued_id, original_id);
 
     git.write_file_txt("second", "resolved second\n")?;

@@ -1335,7 +1335,7 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
     git.run(&["checkout", "HEAD~2"])?;
     git.write_file_txt("first", "new parent first\n")?;
     git.write_file_txt("second", "new parent second\n")?;
-    git.run(&["commit", "-am", "--amend", "-m", "amended parent"])?;
+    git.run(&["commit", "-a", "--amend", "-m", "amended parent"])?;
 
     let repo = git.get_repo()?;
     let conn = repo.get_db_conn()?;

@@ -7,7 +7,9 @@ use std::time::SystemTime;
 use eyre::Context;
 use itertools::Itertools;
 
-use lib::core::eventlog::{BRANCHLESS_TRANSACTION_ID_ENV_VAR, EventLogDb, EventTransactionId};
+use lib::core::eventlog::{
+    BRANCHLESS_TRANSACTION_ID_ENV_VAR, EventLogDb, EventTransactionId, get_rebase_transaction_id,
+};
 use lib::git::{GitRunInfo, Repo};
 use lib::util::{ExitCode, EyreExitOr};
 
@@ -56,6 +58,14 @@ fn make_event_tx_id<S: AsRef<str> + std::fmt::Debug>(
 ) -> eyre::Result<EventTransactionId> {
     let now = SystemTime::now();
     let repo = Repo::from_current_dir()?;
+    // Continuing or aborting a Branchless-managed rebase should stay in the
+    // rebase's transaction rather than starting a new one, since hooks prefer
+    // the transaction ID passed in the environment.
+    if args.first().map(|s| s.as_ref()) == Some("rebase") {
+        if let Some(event_tx_id) = get_rebase_transaction_id(&repo)? {
+            return Ok(event_tx_id);
+        }
+    }
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
     let event_tx_id = {

@@ -1414,7 +1414,9 @@ fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result
 
     git.write_file_txt("second", "resolved second\n")?;
     git.run(&["add", "second.txt"])?;
-    git.run(&["rebase", "--continue"])?;
+    // `git branchless wrap` passes its own transaction ID to the hooks, so it
+    // must reuse the rebase's transaction rather than make a new one.
+    git.branchless("wrap", &["--", "rebase", "--continue"])?;
     assert!(!git.get_repo()?.is_rebase_underway()?);
     assert!(!transaction_id_path.exists());
 

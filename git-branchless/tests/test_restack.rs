@@ -1488,6 +1488,21 @@ fn test_restack_undo_after_unrelated_command_during_pause() -> eyre::Result<()> 
     assert_eq!(git.run(&["rev-parse", "HEAD"])?.0, head_before);
     assert_eq!(git.branchless("query", &["draft()"])?.0, draft_before);
     git.run(&["rev-parse", "--verify", "scratch"])?;
+
+    // The next undo reverts only the scratch branch, which is still applied,
+    // rather than also going back past it to the amend.
+    let (stdout, _stderr) = git.branchless("undo", &["--yes"])?;
+    assert!(stdout.contains("Delete branch scratch"), "{stdout}");
+    assert!(!stdout.contains("Rewrite commit"), "{stdout}");
+    assert_eq!(git.run(&["rev-parse", "HEAD"])?.0, head_before);
+    assert_eq!(git.branchless("query", &["draft()"])?.0, draft_before);
+    git.run_with_options(
+        &["rev-parse", "--verify", "scratch"],
+        &GitRunOptions {
+            expected_exit_code: 128,
+            ..Default::default()
+        },
+    )?;
     Ok(())
 }
 

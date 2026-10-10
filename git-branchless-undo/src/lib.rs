@@ -788,6 +788,57 @@ fn extract_checkout_target(
 /// event it restored the repository to.
 const UNDO_MESSAGE_PREFIX: &str = "undo to event ";
 
+/// Separates the transactions before that event which were also undone.
+const UNDO_MESSAGE_TRANSACTIONS_SEPARATOR: &str = " and transactions ";
+
+/// The state of the repository after a sequence of undos: every event from
+/// `event_id` on has been undone, as have the transactions in `event_tx_ids`.
+#[derive(Debug, Default)]
+struct UndoneEvents {
+    event_id: isize,
+    event_tx_ids: Vec<EventTransactionId>,
+}
+
+impl UndoneEvents {
+    fn to_message(&self) -> String {
+        let Self {
+            event_id,
+            event_tx_ids,
+        } = self;
+        let mut message = format!("{UNDO_MESSAGE_PREFIX}{event_id}");
+        if !event_tx_ids.is_empty() {
+            message.push_str(UNDO_MESSAGE_TRANSACTIONS_SEPARATOR);
+            message.push_str(
+                &event_tx_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+        message
+    }
+
+    fn from_message(message: &str) -> Option<Self> {
+        let message = message.strip_prefix(UNDO_MESSAGE_PREFIX)?;
+        let (event_id, event_tx_ids) = match message.split_once(UNDO_MESSAGE_TRANSACTIONS_SEPARATOR)
+        {
+            Some((event_id, event_tx_ids)) => (
+                event_id,
+                event_tx_ids
+                    .split(',')
+                    .map(|event_tx_id| event_tx_id.parse().ok())
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            None => (message, Vec::new()),
+        };
+        Some(Self {
+            event_id: event_id.parse().ok()?,
+            event_tx_ids,
+        })
+    }
+}
+
 #[instrument(skip(in_))]
 fn undo_events(
     in_: &mut impl Read,
@@ -798,6 +849,7 @@ fn undo_events(
     event_replayer: &EventReplayer,
     event_cursor: EventCursor,
     only_event_tx_id: Option<EventTransactionId>,
+    undone_events: UndoneEvents,
     skip_confirmation: bool,
 ) -> EyreExitOr<()> {
     let now = SystemTime::now();
@@ -867,13 +919,9 @@ fn undo_events(
         return Ok(Err(ExitCode(1)));
     }
 
-    // Record where this undo goes back to, so that a following undo continues
-    // from there instead of undoing this undo.
-    let target_event_id = event_replayer
-        .get_event_before_cursor(event_cursor)
-        .map_or(0, |(event_id, _)| event_id);
-    let event_tx_id =
-        event_log_db.make_transaction_id(now, format!("{UNDO_MESSAGE_PREFIX}{target_event_id}"))?;
+    // Record what has been undone, so that a following undo continues from
+    // there instead of undoing this undo.
+    let event_tx_id = event_log_db.make_transaction_id(now, undone_events.to_message())?;
     let inverse_events = make_inverse_events(event_tx_id)?;
 
     let num_inverse_events = Pluralize {
@@ -997,52 +1045,73 @@ pub fn undo(
         )?
     };
 
-    let (event_cursor, only_event_tx_id) = {
+    let (event_cursor, only_event_tx_id, undone_events) = {
         if interactive {
             let result = with_siv(effects, |effects, siv| {
                 select_past_event(siv, &effects, &repo, &dag, &mut event_replayer)
             })?;
             match result {
-                Some(event_cursor) => (event_cursor, None),
+                Some(event_cursor) => (
+                    event_cursor,
+                    None,
+                    cursor_undone_events(&event_replayer, event_cursor),
+                ),
                 None => return Ok(Ok(())),
             }
         } else {
             // If the last transaction was an undo, keep going back from the
             // state it restored rather than undoing the undo.
-            let last_undo_target = event_log_db
+            let undone_events = event_log_db
                 .get_transaction_messages_since_last_event()?
                 .into_iter()
-                .find_map(|message| {
-                    message
-                        .strip_prefix(UNDO_MESSAGE_PREFIX)
-                        .and_then(|event_id| event_id.parse().ok())
-                });
-            let event_cursor = match last_undo_target {
-                Some(event_id) => event_replayer.make_cursor(event_id),
-                None => event_replayer.make_default_cursor(),
-            };
+                .find_map(|message| UndoneEvents::from_message(&message));
+            let UndoneEvents {
+                event_id,
+                mut event_tx_ids,
+            } = undone_events.unwrap_or_else(|| UndoneEvents {
+                event_id: event_replayer
+                    .get_event_before_cursor(event_replayer.make_default_cursor())
+                    .map_or(0, |(event_id, _)| event_id),
+                event_tx_ids: Vec::new(),
+            });
+            let event_cursor = event_replayer.make_cursor(event_id);
 
-            // A transaction's events aren't necessarily contiguous (e.g. an
-            // unrelated command while a rebase is paused), so go back to its
-            // first event. A plain undo reverts only that transaction's events,
-            // while a continued undo goes back in time past everything.
-            match event_replayer.get_event_before_cursor(event_cursor) {
-                Some((_, event)) if event.get_event_tx_id() != EventTransactionId::Suppressed => {
-                    let event_tx_id = event.get_event_tx_id();
-                    let first_event_id = event_replayer
-                        .get_events_since_cursor(event_replayer.make_cursor(0))
+            // Undo the newest transaction which is still applied. Its events
+            // aren't necessarily contiguous (e.g. an unrelated command while a
+            // rebase is paused), so revert only its events, starting from its
+            // first one.
+            let events = event_replayer.get_events_since_cursor(event_replayer.make_cursor(0));
+            let events = &events[..events.len().min(event_id.try_into()?)];
+            match events
+                .iter()
+                .rev()
+                .map(|event| event.get_event_tx_id())
+                .find(|event_tx_id| !event_tx_ids.contains(event_tx_id))
+            {
+                Some(event_tx_id @ EventTransactionId::Id(_)) => {
+                    let first_event_id = events
                         .iter()
                         .position(|event| event.get_event_tx_id() == event_tx_id)
-                        .expect("The event before the cursor has this transaction ID");
+                        .expect("An event has this transaction ID");
+                    event_tx_ids.push(event_tx_id);
                     (
                         event_replayer.make_cursor(first_event_id.try_into()?),
-                        last_undo_target.is_none().then_some(event_tx_id),
+                        Some(event_tx_id),
+                        UndoneEvents {
+                            event_id,
+                            event_tx_ids,
+                        },
                     )
                 }
-                _ => (
-                    event_replayer.advance_cursor_by_transaction(event_cursor, -1),
-                    None,
-                ),
+                _ => {
+                    let event_cursor =
+                        event_replayer.advance_cursor_by_transaction(event_cursor, -1);
+                    (
+                        event_cursor,
+                        None,
+                        cursor_undone_events(&event_replayer, event_cursor),
+                    )
+                }
             }
         }
     };
@@ -1056,9 +1125,20 @@ pub fn undo(
         &event_replayer,
         event_cursor,
         only_event_tx_id,
+        undone_events,
         skip_confirmation,
     )?;
     Ok(result)
+}
+
+/// Undoing every event from `event_cursor` on.
+fn cursor_undone_events(event_replayer: &EventReplayer, event_cursor: EventCursor) -> UndoneEvents {
+    UndoneEvents {
+        event_id: event_replayer
+            .get_event_before_cursor(event_cursor)
+            .map_or(0, |(event_id, _)| event_id),
+        event_tx_ids: Vec::new(),
+    }
 }
 
 #[allow(missing_docs)]
@@ -1101,6 +1181,7 @@ pub mod testing {
             event_replayer,
             event_cursor,
             None,
+            super::cursor_undone_events(event_replayer, event_cursor),
             false,
         )
     }

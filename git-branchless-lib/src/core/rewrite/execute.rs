@@ -1111,9 +1111,12 @@ mod on_disk {
         let mut todo_commands = Vec::new();
         for command in &rebase_plan.commands {
             let rebase_command = command.to_rebase_command();
-            if !rebase_command.is_empty() {
-                todo_commands.push(rebase_command);
+            // An empty command (a pick with no commits to apply) creates no
+            // commit, so there are no timestamps to restore on HEAD.
+            if rebase_command.is_empty() {
+                continue;
             }
+            todo_commands.push(rebase_command);
             if *preserve_timestamps {
                 let original_commit_oid = match command {
                     RebaseCommand::Pick {

@@ -58,20 +58,30 @@ fn make_event_tx_id<S: AsRef<str> + std::fmt::Debug>(
 ) -> eyre::Result<EventTransactionId> {
     let now = SystemTime::now();
     let repo = Repo::from_current_dir()?;
+
+    // Skip Git's global options (such as `-c name=value`) to find the subcommand.
+    let mut args = args.iter().map(AsRef::as_ref);
+    let subcommand = loop {
+        match args.next() {
+            Some("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env") => {
+                args.next();
+            }
+            Some(arg) if arg.starts_with('-') => {}
+            subcommand => break subcommand,
+        }
+    };
+
     // Continuing or aborting a Branchless-managed rebase should stay in the
     // rebase's transaction rather than starting a new one, since hooks prefer
     // the transaction ID passed in the environment.
-    if args.first().map(|s| s.as_ref()) == Some("rebase") {
+    if subcommand == Some("rebase") {
         if let Some(event_tx_id) = get_rebase_transaction_id(&repo)? {
             return Ok(event_tx_id);
         }
     }
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = {
-        let message = args.first().map(|s| s.as_ref()).unwrap_or("wrap");
-        event_log_db.make_transaction_id(now, message)?
-    };
+    let event_tx_id = event_log_db.make_transaction_id(now, subcommand.unwrap_or("wrap"))?;
     Ok(event_tx_id)
 }
 

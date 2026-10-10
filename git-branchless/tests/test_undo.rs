@@ -1016,11 +1016,12 @@ fn test_undo_auto_print_smartlog_opt_in() -> eyre::Result<()> {
     git.init_repo()?;
     git.commit_file("test1", 1)?;
     git.commit_file("test2", 2)?;
+    git.detach_head()?;
     git.branchless("wrap", &["--", "commit", "--amend", "-m", "bad message"])?;
     git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
 
     let (stdout, _) = git.branchless("undo", &["--yes"])?;
-    assert!(stdout.contains("Applied 4 inverse events."));
+    assert!(stdout.contains("Applied 3 inverse events."));
     assert!(stdout.lines().any(|line| line.starts_with("@ ")));
     Ok(())
 }

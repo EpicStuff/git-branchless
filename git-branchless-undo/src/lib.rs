@@ -784,6 +784,10 @@ fn extract_checkout_target(
     Ok((checkout_target, new_events))
 }
 
+/// Prefix of the transaction message of an undo, followed by the ID of the
+/// event it restored the repository to.
+const UNDO_MESSAGE_PREFIX: &str = "undo to event ";
+
 #[instrument(skip(in_))]
 fn undo_events(
     in_: &mut impl Read,
@@ -796,7 +800,13 @@ fn undo_events(
     skip_confirmation: bool,
 ) -> EyreExitOr<()> {
     let now = SystemTime::now();
-    let event_tx_id = event_log_db.make_transaction_id(now, "undo")?;
+    // Record where this undo goes back to, so that a following undo continues
+    // from there instead of undoing this undo.
+    let target_event_id = event_replayer
+        .get_event_before_cursor(event_cursor)
+        .map_or(0, |(event_id, _)| event_id);
+    let event_tx_id =
+        event_log_db.make_transaction_id(now, format!("{UNDO_MESSAGE_PREFIX}{target_event_id}"))?;
     let head_info = repo.get_head_info()?;
     let inverse_events: Vec<Event> = event_replayer
         .get_events_since_cursor(event_cursor)
@@ -985,7 +995,21 @@ pub fn undo(
                 None => return Ok(Ok(())),
             }
         } else {
-            event_replayer.advance_cursor_by_transaction(event_replayer.make_default_cursor(), -1)
+            // If the last transaction was an undo, keep going back from the
+            // state it restored rather than undoing the undo.
+            let mut event_cursor = event_replayer.make_default_cursor();
+            let last_undo_target = event_log_db
+                .get_transaction_messages_since_last_event()?
+                .into_iter()
+                .find_map(|message| {
+                    message
+                        .strip_prefix(UNDO_MESSAGE_PREFIX)
+                        .and_then(|event_id| event_id.parse().ok())
+                });
+            if let Some(event_id) = last_undo_target {
+                event_cursor = event_replayer.make_cursor(event_id);
+            }
+            event_replayer.advance_cursor_by_transaction(event_cursor, -1)
         }
     };
 

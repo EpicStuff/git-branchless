@@ -731,6 +731,25 @@ WHERE event_tx_id = :event_tx_id
         )?;
         Ok(result)
     }
+
+    /// Get the messages of the transactions made since the most recent
+    /// transaction with events (inclusive), newest first. Transactions can have
+    /// no events, e.g. read-only commands or reference updates made without
+    /// Git's hooks.
+    pub fn get_transaction_messages_since_last_event(&self) -> eyre::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "
+SELECT message
+FROM event_transactions
+WHERE event_tx_id >= (SELECT COALESCE(MAX(event_tx_id), 0) FROM event_log)
+ORDER BY event_tx_id DESC
+",
+        )?;
+        let messages = stmt
+            .query_map(rusqlite::params![], |row| row.get("message"))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(messages)
+    }
 }
 
 /// Determine whether a given reference is used to keep a commit alive.

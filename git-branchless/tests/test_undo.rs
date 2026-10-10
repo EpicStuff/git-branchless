@@ -1025,3 +1025,31 @@ fn test_undo_auto_print_smartlog_opt_in() -> eyre::Result<()> {
     assert!(stdout.lines().any(|line| line.starts_with("@ ")));
     Ok(())
 }
+
+#[test]
+fn test_undo_repeated_keeps_going_back() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["branch", "first"])?;
+    git.run(&["branch", "second"])?;
+
+    let branches =
+        || -> eyre::Result<String> { Ok(git.run(&["branch", "--format=%(refname:short)"])?.0) };
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(branches()?, "first\nmaster\n");
+
+    // A second undo goes back another step instead of undoing the first undo.
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(branches()?, "master\n");
+
+    // After an unrelated command, undo starts from the latest state again.
+    git.run(&["branch", "third"])?;
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(branches()?, "master\n");
+    Ok(())
+}

@@ -974,7 +974,7 @@ mod on_disk {
     use crate::core::rewrite::plan::RebaseCommand;
     use crate::core::rewrite::plan::RebasePlan;
     use crate::core::rewrite::rewrite_hooks::save_original_head_info;
-    use crate::git::config::ConfigRead;
+    use crate::git::ConfigRead;
     use crate::git::{GitRunInfo, Repo};
 
     use crate::util::ExitCode;
@@ -1212,7 +1212,7 @@ mod on_disk {
             effects.get_output_stream(),
             "Calling Git for on-disk rebase..."
         )?;
-        let rerere_autoupdate = repo.get_config()?.get_or("rerere.autoupdate", false)?;
+        let rerere_autoupdate = repo.get_readonly_config()?.get_or("rerere.autoupdate", false)?;
         let mut retried_conflicts = HashSet::new();
         let mut retry_git_run_info = git_run_info.clone();
         retry_git_run_info.env.insert("GIT_EDITOR".into(), ":".into());

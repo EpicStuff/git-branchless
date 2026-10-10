@@ -467,7 +467,7 @@ pub fn hook_preserve_commit_timestamps(original_commit_oid: NonZeroOid) -> eyre:
     add_rewritten_list_entries(
         &repo.get_tempfile_dir()?,
         &repo.get_rebase_state_dir_path().join("rewritten-list"),
-        &[(original_commit_oid, rewritten_oid)],
+        &[(original_commit_oid, MaybeZeroOid::NonZero(rewritten_oid))],
     )?;
     Ok(())
 }

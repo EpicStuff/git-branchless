@@ -459,20 +459,29 @@ pub fn hook_preserve_commit_timestamps(original_commit_oid: NonZeroOid) -> eyre:
         &tree,
         parents.iter().collect(),
     )?;
-    if rewritten_oid != head_oid {
-        repo.set_head(rewritten_oid)?;
-        // `set_head` doesn't run the reference-transaction hook, so mark the
-        // new commit reachable here like the in-memory rebase does.
-        mark_commit_reachable(&repo, rewritten_oid)?;
+    if rewritten_oid == head_oid {
+        return Ok(());
     }
 
+    // `set_head` doesn't run the reference-transaction hook, so mark the new
+    // commit reachable here like the in-memory rebase does.
+    mark_commit_reachable(&repo, rewritten_oid)?;
+    let tempfile_dir = repo.get_tempfile_dir()?;
+    let rewritten_list_path = repo.get_rebase_state_dir_path().join("rewritten-list");
+    repo.set_head(rewritten_oid)?;
+
     // Override the sequencer's intermediate mapping so post-rewrite moves
-    // branches to the commit with the correct timestamps.
-    add_rewritten_list_entries(
-        &repo.get_tempfile_dir()?,
-        &repo.get_rebase_state_dir_path().join("rewritten-list"),
+    // branches to the commit with the correct timestamps. Git doesn't rerun a
+    // failed exec on `git rebase --continue`, so if this fails, restore HEAD to
+    // keep it consistent with the sequencer's own mapping.
+    if let Err(err) = add_rewritten_list_entries(
+        &tempfile_dir,
+        &rewritten_list_path,
         &[(original_commit_oid, MaybeZeroOid::NonZero(rewritten_oid))],
-    )?;
+    ) {
+        repo.set_head(head_oid)?;
+        return Err(err);
+    }
     Ok(())
 }
 

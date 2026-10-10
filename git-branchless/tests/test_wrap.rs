@@ -375,3 +375,38 @@ fn test_wrap_exit_code() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_wrap_uses_repository_from_dash_c() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+
+    // Run from inside another repository, which `-C` points away from.
+    std::fs::create_dir(git.repo_path.join("other"))?;
+    let other_options = GitRunOptions {
+        subdir: Some("other".into()),
+        ..Default::default()
+    };
+    git.run_with_options(&["init"], &other_options)?;
+
+    git.write_file_txt("test1", "contents")?;
+    git.run(&["add", "test1.txt"])?;
+    let repo_path = git.repo_path.to_str().unwrap();
+    git.branchless_with_options(
+        "wrap",
+        &["--", "-C", repo_path, "commit", "-m", "test1"],
+        &other_options,
+    )?;
+
+    let repo = git.get_repo()?;
+    let conn = repo.get_db_conn()?;
+    let event_log_db = EventLogDb::new(&conn)?;
+    let events = event_log_db.get_events()?;
+    let last_event = events.last().unwrap();
+    assert_eq!(
+        event_log_db.get_transaction_message(last_event.get_event_tx_id())?,
+        "commit"
+    );
+
+    Ok(())
+}

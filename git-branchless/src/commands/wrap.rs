@@ -54,22 +54,30 @@ fn pass_through_git_command<S: AsRef<str> + std::fmt::Debug>(
 }
 
 fn make_event_tx_id<S: AsRef<str> + std::fmt::Debug>(
+    git_run_info: &GitRunInfo,
     args: &[S],
 ) -> eyre::Result<EventTransactionId> {
     let now = SystemTime::now();
-    let repo = Repo::from_current_dir()?;
 
-    // Skip Git's global options (such as `-c name=value`) to find the subcommand.
+    // Skip Git's global options (such as `-c name=value`) to find the
+    // subcommand, following any `-C <path>` to the repository Git will use.
+    let mut repo_dir = git_run_info.working_directory.clone();
     let mut args = args.iter().map(AsRef::as_ref);
     let subcommand = loop {
         match args.next() {
-            Some("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env") => {
+            Some("-C") => {
+                if let Some(path) = args.next() {
+                    repo_dir.push(path);
+                }
+            }
+            Some("-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env") => {
                 args.next();
             }
             Some(arg) if arg.starts_with('-') => {}
             subcommand => break subcommand,
         }
     };
+    let repo = Repo::from_dir(&repo_dir)?;
 
     // Continuing or aborting a Branchless-managed rebase should stay in the
     // rebase's transaction rather than starting a new one, since hooks prefer
@@ -92,7 +100,7 @@ pub fn wrap<S: AsRef<str> + std::fmt::Debug>(
 ) -> EyreExitOr<()> {
     // We may not be able to make an event transaction ID (such as if there is
     // no repository in the current directory). Ignore the error in that case.
-    let event_tx_id = make_event_tx_id(args).ok();
+    let event_tx_id = make_event_tx_id(git_run_info, args).ok();
 
     let exit_code = pass_through_git_command(git_run_info, args, event_tx_id)?;
     Ok(exit_code)

@@ -20,6 +20,7 @@ use crate::core::dag::Dag;
 use crate::core::effects::Effects;
 use crate::core::eventlog::{Event, EventLogDb, EventReplayer};
 use crate::core::formatting::Pluralize;
+use crate::core::gc::mark_commit_reachable;
 use crate::core::repo_ext::RepoExt;
 use crate::git::{
     CategorizedReferenceName, GitRunInfo, MaybeZeroOid, NonZeroOid, ReferenceName, Repo,
@@ -460,6 +461,9 @@ pub fn hook_preserve_commit_timestamps(original_commit_oid: NonZeroOid) -> eyre:
     )?;
     if rewritten_oid != head_oid {
         repo.set_head(rewritten_oid)?;
+        // `set_head` doesn't run the reference-transaction hook, so mark the
+        // new commit reachable here like the in-memory rebase does.
+        mark_commit_reachable(&repo, rewritten_oid)?;
     }
 
     // Override the sequencer's intermediate mapping so post-rewrite moves

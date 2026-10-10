@@ -174,24 +174,12 @@ impl Git {
             .into_owned();
 
         // Timestamp preservation adds an internal rebase exec step. Its log
-        // line and reference update are implementation details which should
-        // not change snapshots of the surrounding Git operation.
-        let mut within_timestamp_hook = false;
+        // line is an implementation detail which should not change snapshots
+        // of the surrounding Git operation.
         let output = output
             .split_inclusive('\n')
             .filter(|line| {
-                let line = line.trim_end_matches('\n');
-                if line.starts_with("Executing: git branchless hook-preserve-commit-timestamps ") {
-                    within_timestamp_hook = true;
-                    return false;
-                }
-                if within_timestamp_hook {
-                    within_timestamp_hook = false;
-                    if line == "branchless: processing 1 update: ref HEAD" {
-                        return false;
-                    }
-                }
-                true
+                !line.starts_with("Executing: git branchless hook-preserve-commit-timestamps ")
             })
             .collect();
 

@@ -2427,7 +2427,7 @@ fn test_move_merge_conflict() -> eyre::Result<()> {
     {
         let (stdout, _stderr) = git.run(&["rebase", "--continue"])?;
         insta::assert_snapshot!(stdout, @r###"
-        [detached HEAD 42951b5] create conflict.txt
+        [detached HEAD 244e2bd] create conflict.txt
          1 file changed, 1 insertion(+), 1 deletion(-)
         "###);
     }

@@ -423,7 +423,7 @@ fn test_amended_initial_commit() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) =
-            git.branchless("restack", &["--on-disk", "--force-rewrite", "all()"])?;
+            git.branchless("restack", &["--on-disk", "--force-rewrite"])?;
         let stdout = remove_rebase_lines(stdout);
         insta::assert_snapshot!(stdout, @r###"
         branchless: running command: <git-executable> diff --quiet
@@ -465,8 +465,7 @@ fn test_amended_initial_commit_auto_print() -> eyre::Result<()> {
     }
 
     {
-        let (stdout, _stderr) =
-            git.branchless("restack", &["--on-disk", "--force-rewrite", "all()"])?;
+        let (stdout, _stderr) = git.branchless("restack", &["--on-disk", "--force-rewrite"])?;
         let stdout = remove_rebase_lines(stdout);
         insta::assert_snapshot!(stdout, @"
         branchless: running command: <git-executable> diff --quiet
@@ -480,6 +479,34 @@ fn test_amended_initial_commit_auto_print() -> eyre::Result<()> {
         ");
     }
 
+    Ok(())
+}
+
+/// The normal implicit revset must keep excluding abandoned public commits.
+/// An explicit revset must never be expanded by --force-rewrite either.
+#[test]
+fn test_restack_default_and_explicit_draft_exclude_public_commits() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+
+    let old_initial_oid = git.run(&["rev-parse", "HEAD"])?.0.trim().to_owned();
+    let public_child_oid = git.commit_file("public-child", 1)?;
+    git.run(&["checkout", &old_initial_oid])?;
+    git.run(&["commit", "--amend", "-m", "new initial commit"])?;
+
+    let (stdout, _) = git.branchless("restack", &[])?;
+    assert!(stdout.contains("No abandoned commits to restack."));
+    assert_eq!(
+        git.run(&["rev-parse", "master"])?.0.trim(),
+        public_child_oid.to_string()
+    );
+
+    let (stdout, _) = git.branchless("restack", &["--force-rewrite", "draft()"])?;
+    assert!(stdout.contains("No abandoned commits to restack."));
+    assert_eq!(
+        git.run(&["rev-parse", "master"])?.0.trim(),
+        public_child_oid.to_string()
+    );
     Ok(())
 }
 

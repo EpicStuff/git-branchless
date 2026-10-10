@@ -292,6 +292,14 @@ pub fn restack(
         &references_snapshot,
     )?;
 
+    // The normal default only considers draft commits. With --force-rewrite,
+    // an omitted revset means all abandoned commits, including public ones.
+    // Never expand a revset which the user explicitly supplied.
+    let revsets = if revsets.is_empty() && !move_options.force_rewrite_public_commits {
+        vec![Revset("draft()".to_string())]
+    } else {
+        revsets
+    };
     let commit_sets =
         match resolve_commits(effects, &repo, &mut dag, &revsets, resolve_revset_options) {
             Ok(commit_sets) => commit_sets,

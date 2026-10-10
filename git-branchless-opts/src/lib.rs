@@ -620,8 +620,9 @@ pub enum Command {
     /// Fix up commits abandoned by a previous rewrite operation.
     Restack {
         /// The IDs of the abandoned commits whose descendants should be
-        /// restacked. If not provided, all abandoned commits are restacked.
-        #[clap(value_parser, default_value = "draft()")]
+        /// restacked. Defaults to draft() unless --force-rewrite is supplied,
+        /// in which case all abandoned commits are considered.
+        #[clap(value_parser)]
         revsets: Vec<Revset>,
 
         /// Options for resolving revset expressions.

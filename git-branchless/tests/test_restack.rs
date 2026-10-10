@@ -422,8 +422,7 @@ fn test_amended_initial_commit() -> eyre::Result<()> {
     }
 
     {
-        let (stdout, _stderr) =
-            git.branchless("restack", &["--on-disk", "--force-rewrite"])?;
+        let (stdout, _stderr) = git.branchless("restack", &["--on-disk", "--force-rewrite"])?;
         let stdout = remove_rebase_lines(stdout);
         insta::assert_snapshot!(stdout, @r###"
         branchless: running command: <git-executable> diff --quiet

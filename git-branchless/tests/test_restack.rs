@@ -1293,6 +1293,99 @@ fn test_restack_rerere_autoupdate_continues() -> eyre::Result<()> {
     Ok(())
 }
 
+
+/// A Branchless on-disk rebase must remain one undo transaction even when
+/// manually resumed after multiple conflicts in separate Git processes.
+#[test]
+fn test_restack_manual_continuations_keep_original_transaction() -> eyre::Result<()> {
+    use lib::core::eventlog::{EventLogDb, EventTransactionId};
+
+    let git = make_git()?;
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.detach_head()?;
+    git.write_file_txt("first", "base first\n")?;
+    git.write_file_txt("second", "base second\n")?;
+    git.run(&["add", "."])?;
+    git.run(&["commit", "-m", "parent"])?;
+    git.write_file_txt("first", "child first\n")?;
+    git.run(&["commit", "-am", "first child"])?;
+    git.write_file_txt("second", "child second\n")?;
+    git.run(&["commit", "-am", "second child"])?;
+    let original_stack = git.run(&["rev-parse", "HEAD"])?.0.trim().to_owned();
+    git.run(&["branch", "stack"])?;
+
+    git.run(&["checkout", "HEAD~2"])?;
+    git.write_file_txt("first", "new parent first\n")?;
+    git.write_file_txt("second", "new parent second\n")?;
+    git.run(&["commit", "-am", "--amend", "-m", "amended parent"])?;
+
+    let repo = git.get_repo()?;
+    let conn = repo.get_db_conn()?;
+    let event_log_db = EventLogDb::new(&conn)?;
+    let events_before = event_log_db.get_events()?.len();
+
+    git.branchless_with_options(
+        "restack",
+        &["--on-disk"],
+        &GitRunOptions {
+            expected_exit_code: 1,
+            ..Default::default()
+        },
+    )?;
+
+    let transaction_id_path = git
+        .get_repo()?
+        .get_rebase_state_dir_path()
+        .join("branchless_transaction_id");
+    let original_id: EventTransactionId =
+        std::fs::read_to_string(&transaction_id_path)?.trim().parse()?;
+    assert_eq!(event_log_db.get_transaction_message(original_id)?, "restack");
+
+    git.write_file_txt("first", "resolved first\n")?;
+    git.run(&["add", "first.txt"])?;
+    git.run_with_options(
+        &["rebase", "--continue"],
+        &GitRunOptions {
+            expected_exit_code: 1,
+            ..Default::default()
+        },
+    )?;
+    assert!(git.get_repo()?.get_index()?.has_conflicts());
+    let continued_id: EventTransactionId =
+        std::fs::read_to_string(&transaction_id_path)?.trim().parse()?;
+    assert_eq!(continued_id, original_id);
+
+    git.write_file_txt("second", "resolved second\n")?;
+    git.run(&["add", "second.txt"])?;
+    git.run(&["rebase", "--continue"])?;
+    assert!(!git.get_repo()?.is_rebase_underway()?);
+    assert!(!transaction_id_path.exists());
+
+    let rewritten_stack = git.run(&["rev-parse", "stack"])?.0.trim().to_owned();
+    assert_ne!(rewritten_stack, original_stack);
+
+    // The commits and final branch move must all belong to the original
+    // transaction, not to one transaction for each manual continuation.
+    let new_events = event_log_db.get_events()?;
+    let new_events = &new_events[events_before..];
+    assert!(!new_events.is_empty());
+    assert!(
+        new_events
+            .iter()
+            .all(|event| event.get_event_tx_id() == original_id)
+    );
+
+    // A single undo should restore the complete original stack ref.
+    git.branchless("undo", &["--yes"])?;
+    let restored_stack = git.run(&["rev-parse", "stack"])?.0.trim().to_owned();
+    assert_eq!(restored_stack, original_stack);
+    Ok(())
+}
+
 #[test]
 fn test_restack_auto_print_smartlog_opt_in() -> eyre::Result<()> {
     let git = make_git()?;

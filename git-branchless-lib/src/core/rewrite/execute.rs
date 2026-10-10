@@ -970,6 +970,7 @@ mod on_disk {
     use tracing::instrument;
 
     use crate::core::effects::{Effects, OperationType};
+    use crate::core::eventlog::BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME;
     use crate::core::rewrite::plan::RebaseCommand;
     use crate::core::rewrite::plan::RebasePlan;
     use crate::core::rewrite::rewrite_hooks::save_original_head_info;
@@ -994,7 +995,7 @@ mod on_disk {
     ) -> eyre::Result<Result<(), Error>> {
         let ExecuteRebasePlanOptions {
             now: _,
-            event_tx_id: _,
+            event_tx_id,
             preserve_timestamps,
             force_in_memory: _,
             force_on_disk: _,
@@ -1025,6 +1026,13 @@ mod on_disk {
                 &rebase_state_dir
             )
         })?;
+
+        // Preserve the transaction for manual rebase continuations, whose hooks
+        // do not inherit the original Branchless process environment.
+        let transaction_id_path =
+            rebase_state_dir.join(BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME);
+        std::fs::write(&transaction_id_path, event_tx_id.to_string())
+            .wrap_err_with(|| format!("Writing transaction ID to: {:?}", transaction_id_path))?;
 
         // Mark this rebase as an interactive rebase. For whatever reason, if this
         // is not marked as an interactive rebase, then some rebase plans fail with

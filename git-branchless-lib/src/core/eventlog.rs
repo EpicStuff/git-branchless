@@ -25,6 +25,28 @@ use super::repo_ext::RepoReferencesSnapshot;
 /// which the caller has already started.
 pub const BRANCHLESS_TRANSACTION_ID_ENV_VAR: &str = "BRANCHLESS_TRANSACTION_ID";
 
+/// Persist the transaction ID with the Git sequencer so a manual
+/// `git rebase --continue` can use the same transaction after a conflict.
+pub const BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME: &str = "branchless_transaction_id";
+
+/// Read the ID for a Branchless-managed on-disk rebase. Ordinary Git rebases
+/// do not have this file, so their hooks create transactions as usual.
+pub fn get_rebase_transaction_id(repo: &Repo) -> eyre::Result<Option<EventTransactionId>> {
+    let path = repo
+        .get_rebase_state_dir_path()
+        .join(BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME);
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).wrap_err_with(|| format!("Reading {:?}", path)),
+    };
+    let event_tx_id: EventTransactionId = contents
+        .trim()
+        .parse()
+        .wrap_err_with(|| format!("Parsing transaction ID at {:?}", path))?;
+    Ok(Some(event_tx_id))
+}
+
 // Wrapper around the row stored directly in the database.
 #[derive(Clone, Debug)]
 struct Row {
@@ -45,11 +67,8 @@ struct Row {
 /// experience for `git undo`, since the user probably wants to see or undo all
 /// of the logically-related events at once, rather than individually.
 ///
-/// Note that some logically-related events may not be included together in the
-/// same transaction. For example, if a rebase is interrupted due to a merge
-/// conflict, then the commits applied due to `git rebase` and the commits
-/// applied due to `git rebase --continue` may not share the same transaction.
-/// In this sense, a transaction is "best-effort".
+/// Branchless-managed on-disk rebases persist the transaction ID so their
+/// events also share a transaction across manual `git rebase --continue` calls.
 ///
 /// Unlike in a database, there is no specific guarantee that an event
 /// transaction is an atomic unit of work.
@@ -662,6 +681,29 @@ ORDER BY rowid ASC
         now: SystemTime,
         message: impl AsRef<str>,
     ) -> eyre::Result<EventTransactionId> {
+        self.make_transaction_id_inner(now, message.as_ref())
+    }
+
+    /// Get the transaction for a hook, restoring the original ID when Git
+    /// resumes a Branchless-managed rebase outside of the initial process.
+    /// Commands themselves continue to use `make_transaction_id`, so an
+    /// unrelated Branchless command during a paused rebase isn't grouped with
+    /// the rebase merely because the state file exists.
+    pub fn make_hook_transaction_id(
+        &self,
+        now: SystemTime,
+        message: impl AsRef<str>,
+    ) -> eyre::Result<EventTransactionId> {
+        if let Ok(transaction_id) = std::env::var(BRANCHLESS_TRANSACTION_ID_ENV_VAR) {
+            if let Ok(transaction_id) = transaction_id.parse::<EventTransactionId>() {
+                return Ok(transaction_id);
+            }
+        }
+        if let Ok(repo) = Repo::from_current_dir() {
+            if let Some(event_tx_id) = get_rebase_transaction_id(&repo)? {
+                return Ok(event_tx_id);
+            }
+        }
         self.make_transaction_id_inner(now, message.as_ref())
     }
 

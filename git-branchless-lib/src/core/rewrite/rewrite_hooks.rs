@@ -131,7 +131,7 @@ pub fn hook_post_rewrite(
 
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = event_log_db.make_transaction_id(now, "hook-post-rewrite")?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, "hook-post-rewrite")?;
 
     let (rewritten_oids, rewrite_events) = {
         let rewritten_oids = read_rewritten_list_entries(&mut stdin().lock())?;

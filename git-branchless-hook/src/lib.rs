@@ -66,7 +66,7 @@ fn hook_post_checkout(
     let repo = Repo::from_current_dir()?;
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = event_log_db.make_transaction_id(now, "hook-post-checkout")?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, "hook-post-checkout")?;
     event_log_db.add_events(vec![Event::RefUpdateEvent {
         timestamp: timestamp.as_secs_f64(),
         event_tx_id,
@@ -143,7 +143,7 @@ fn hook_post_commit_common(effects: &Effects, hook_name: &str) -> eyre::Result<(
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs_f64();
 
-    let event_tx_id = event_log_db.make_transaction_id(now, hook_name)?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, hook_name)?;
     event_log_db.add_events(vec![Event::CommitEvent {
         timestamp,
         event_tx_id,
@@ -515,7 +515,7 @@ fn hook_reference_transaction(effects: &Effects, transaction_state: &str) -> eyr
     let repo = Repo::from_current_dir()?;
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = event_log_db.make_transaction_id(now, "reference-transaction")?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, "reference-transaction")?;
 
     let packed_references = read_packed_refs_file(&repo)?;
 

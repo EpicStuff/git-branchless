@@ -1104,13 +1104,14 @@ pub fn undo(
                     )
                 }
                 _ => {
-                    let event_cursor =
-                        event_replayer.advance_cursor_by_transaction(event_cursor, -1);
-                    (
-                        event_cursor,
-                        None,
-                        cursor_undone_events(&event_replayer, event_cursor),
-                    )
+                    // All recorded transactions have already been undone.
+                    // Going back by cursor would select events which were
+                    // previously undone and might undo older history again.
+                    writeln!(
+                        effects.get_output_stream(),
+                        "No undo actions to apply, exiting."
+                    )?;
+                    return Ok(Ok(()));
                 }
             }
         }

@@ -1074,7 +1074,6 @@ pub fn undo(
                     .map_or(0, |(event_id, _)| event_id),
                 event_tx_ids: Vec::new(),
             });
-            let event_cursor = event_replayer.make_cursor(event_id);
 
             // Undo the newest transaction which is still applied. Its events
             // aren't necessarily contiguous (e.g. an unrelated command while a

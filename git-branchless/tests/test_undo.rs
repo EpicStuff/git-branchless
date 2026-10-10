@@ -1049,7 +1049,10 @@ fn test_undo_repeated_keeps_going_back() -> eyre::Result<()> {
 
     // After exhausting the history, repeated undo must not revisit old events.
     let (stdout, _) = git.branchless("undo", &["--yes"])?;
-    assert!(stdout.contains("No undo actions to apply, exiting."), "{stdout}");
+    assert!(
+        stdout.contains("No undo actions to apply, exiting."),
+        "{stdout}"
+    );
     assert_eq!(branches()?, "master\n");
 
     // After an unrelated command, undo starts from the latest state again.

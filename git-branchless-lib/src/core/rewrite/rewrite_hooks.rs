@@ -97,16 +97,22 @@ fn add_rewritten_list_entries(
         Err(err) => return Err(err.into()),
     };
 
-    let mut entries_to_add: HashMap<NonZeroOid, MaybeZeroOid> = entries.iter().copied().collect();
-    let mut new_entries = Vec::new();
-    for (old_commit_oid, new_commit_oid) in current_entries {
-        let new_entry = match entries_to_add.remove(&old_commit_oid) {
-            Some(new_commit_oid) => (old_commit_oid, new_commit_oid),
-            None => (old_commit_oid, new_commit_oid),
-        };
-        new_entries.push(new_entry);
+    // Keep a single entry per old commit. Git can write several for the same
+    // commit (e.g. a conflicted merge that is then continued), and readers keep
+    // the last one, so a later stale entry would override the new mapping.
+    let mut new_entries: Vec<(NonZeroOid, MaybeZeroOid)> = Vec::new();
+    let mut entry_indexes: HashMap<NonZeroOid, usize> = HashMap::new();
+    for (old_commit_oid, new_commit_oid) in
+        current_entries.into_iter().chain(entries.iter().copied())
+    {
+        match entry_indexes.get(&old_commit_oid) {
+            Some(&index) => new_entries[index].1 = new_commit_oid,
+            None => {
+                entry_indexes.insert(old_commit_oid, new_entries.len());
+                new_entries.push((old_commit_oid, new_commit_oid));
+            }
+        }
     }
-    new_entries.extend(entries_to_add.into_iter());
 
     write_rewritten_list(tempfile_dir, rewritten_list_path, new_entries.as_slice())?;
     Ok(())
@@ -575,4 +581,38 @@ pub fn hook_skip_upstream_applied_commit(
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_rewritten_list_entries_replaces_duplicates() -> eyre::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let rewritten_list_path = dir.path().join("rewritten-list");
+        let old: NonZeroOid = "1111111111111111111111111111111111111111".parse()?;
+        let other: NonZeroOid = "2222222222222222222222222222222222222222".parse()?;
+        std::fs::write(
+            &rewritten_list_path,
+            format!(
+                "{old} 3333333333333333333333333333333333333333\n\
+                 {other} 4444444444444444444444444444444444444444\n\
+                 {old} 5555555555555555555555555555555555555555\n"
+            ),
+        )?;
+
+        let new: MaybeZeroOid = "6666666666666666666666666666666666666666".parse()?;
+        add_rewritten_list_entries(&dir.path().join("tmp"), &rewritten_list_path, &[(old, new)])?;
+
+        let entries = read_rewritten_list_entries(&mut File::open(&rewritten_list_path)?)?;
+        assert_eq!(
+            entries,
+            vec![
+                (old, new),
+                (other, "4444444444444444444444444444444444444444".parse()?),
+            ]
+        );
+        Ok(())
+    }
 }

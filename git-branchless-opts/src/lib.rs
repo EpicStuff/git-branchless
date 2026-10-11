@@ -237,6 +237,12 @@ pub enum HookSubcommand {
         transaction_state: String,
     },
     /// Internal use.
+    PreserveCommitTimestamps {
+        /// The original commit whose timestamps should be retained.
+        #[clap(value_parser)]
+        original_commit_oid: String,
+    },
+    /// Internal use.
     RegisterExtraPostRewriteHook,
     /// Internal use.
     SkipUpstreamAppliedCommit {
@@ -614,8 +620,9 @@ pub enum Command {
     /// Fix up commits abandoned by a previous rewrite operation.
     Restack {
         /// The IDs of the abandoned commits whose descendants should be
-        /// restacked. If not provided, all abandoned commits are restacked.
-        #[clap(value_parser, default_value = "draft()")]
+        /// restacked. Defaults to draft() unless --force-rewrite is supplied,
+        /// in which case all abandoned commits are considered.
+        #[clap(value_parser)]
         revsets: Vec<Revset>,
 
         /// Options for resolving revset expressions.

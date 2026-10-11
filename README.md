@@ -163,6 +163,18 @@ When you use `git rebase --interactive` with `git-branchless`, you will be promp
 
 </details>
 
+## Automatic smartlog output
+
+Commands such as `git restack`, `git undo`, `git switch`, `git next`, `git prev`, and `git split` do not print the smartlog automatically by default.
+
+To restore automatic smartlog printing, enable `branchless.smartlog.autoPrint`:
+
+```sh
+git config --global branchless.smartlog.autoPrint true
+```
+
+Set it to `false` to disable automatic printing again. The setting can also be set for an individual repository without `--global`. The explicit `git smartlog` command and the interactive `git undo` history view are unaffected.
+
 ## Installation
 
 See https://github.com/arxanas/git-branchless/wiki/Installation.

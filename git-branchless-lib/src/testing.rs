@@ -173,6 +173,16 @@ impl Git {
             .replace_all(&output, "")
             .into_owned();
 
+        // Timestamp preservation adds an internal rebase exec step. Its log
+        // line is an implementation detail which should not change snapshots
+        // of the surrounding Git operation.
+        let output = output
+            .split_inclusive('\n')
+            .filter(|line| {
+                !line.starts_with("Executing: git branchless hook-preserve-commit-timestamps ")
+            })
+            .collect();
+
         Ok(output)
     }
 

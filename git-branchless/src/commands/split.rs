@@ -13,7 +13,7 @@ use git_branchless_revset::resolve_commits;
 use lib::{
     core::{
         check_out::{CheckOutCommitOptions, CheckoutTarget, check_out_commit},
-        config::get_restack_preserve_timestamps,
+        config::{get_restack_preserve_timestamps, get_smartlog_auto_print},
         dag::{CommitSet, Dag},
         effects::Effects,
         eventlog::{Event, EventLogDb, EventReplayer},
@@ -595,10 +595,12 @@ pub fn split(
         None
         | Some(ExecuteRebasePlanResult::Succeeded { rewritten_oids: _ })
         | Some(ExecuteRebasePlanResult::WouldSucceed) => {
-            try_exit_code!(
-                git_run_info
-                    .run_direct_no_wrapping(Some(event_tx_id), &["branchless", "smartlog"])?
-            );
+            if get_smartlog_auto_print(&repo)? {
+                try_exit_code!(
+                    git_run_info
+                        .run_direct_no_wrapping(Some(event_tx_id), &["branchless", "smartlog"])?
+                );
+            }
             Ok(Ok(()))
         }
 

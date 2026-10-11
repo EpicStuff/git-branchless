@@ -881,8 +881,6 @@ fn test_undo_noninteractive() -> eyre::Result<()> {
         4. Check out from 9ed8f9a bad message
                        to 96d1c37 create test2.txt
         Confirm? [yN] branchless: running command: <git-executable> checkout master --detach --
-        :
-        @ 96d1c37 (master) create test2.txt
         Applied 4 inverse events.
         "###);
     }
@@ -1005,5 +1003,90 @@ fn test_undo_unseen_commit() -> eyre::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+#[test]
+fn test_undo_auto_print_smartlog_opt_in() -> eyre::Result<()> {
+    let git = make_git()?;
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.detach_head()?;
+    git.branchless("wrap", &["--", "commit", "--amend", "-m", "bad message"])?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let (stdout, _) = git.branchless("undo", &["--yes"])?;
+    assert!(stdout.contains("Applied 3 inverse events."));
+    assert!(stdout.lines().any(|line| line.starts_with("@ ")));
+    Ok(())
+}
+
+#[test]
+fn test_undo_repeated_keeps_going_back() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["branch", "first"])?;
+    git.run(&["branch", "second"])?;
+
+    let branches =
+        || -> eyre::Result<String> { Ok(git.run(&["branch", "--format=%(refname:short)"])?.0) };
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(branches()?, "first\nmaster\n");
+
+    // A second undo goes back another step instead of undoing the first undo.
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(branches()?, "master\n");
+
+    // After exhausting the history, repeated undo must not revisit old events.
+    let (stdout, _) = git.branchless("undo", &["--yes"])?;
+    assert!(
+        stdout.contains("No undo actions to apply, exiting."),
+        "{stdout}"
+    );
+    assert_eq!(branches()?, "master\n");
+
+    // After an unrelated command, undo starts from the latest state again.
+    git.run(&["branch", "third"])?;
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(branches()?, "master\n");
+    Ok(())
+}
+
+#[test]
+fn test_undo_declined_does_not_count() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["branch", "first"])?;
+    git.run(&["branch", "second"])?;
+
+    git.branchless_with_options(
+        "undo",
+        &[],
+        &GitRunOptions {
+            expected_exit_code: 1,
+            input: Some("n".to_string()),
+            ..Default::default()
+        },
+    )?;
+    git.branchless("undo", &["--yes"])?;
+    assert_eq!(
+        git.run(&["branch", "--format=%(refname:short)"])?.0,
+        "first\nmaster\n"
+    );
     Ok(())
 }

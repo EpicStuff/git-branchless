@@ -20,6 +20,7 @@ use crate::core::dag::Dag;
 use crate::core::effects::Effects;
 use crate::core::eventlog::{Event, EventLogDb, EventReplayer};
 use crate::core::formatting::Pluralize;
+use crate::core::gc::mark_commit_reachable;
 use crate::core::repo_ext::RepoExt;
 use crate::git::{
     CategorizedReferenceName, GitRunInfo, MaybeZeroOid, NonZeroOid, ReferenceName, Repo,
@@ -96,16 +97,22 @@ fn add_rewritten_list_entries(
         Err(err) => return Err(err.into()),
     };
 
-    let mut entries_to_add: HashMap<NonZeroOid, MaybeZeroOid> = entries.iter().copied().collect();
-    let mut new_entries = Vec::new();
-    for (old_commit_oid, new_commit_oid) in current_entries {
-        let new_entry = match entries_to_add.remove(&old_commit_oid) {
-            Some(new_commit_oid) => (old_commit_oid, new_commit_oid),
-            None => (old_commit_oid, new_commit_oid),
-        };
-        new_entries.push(new_entry);
+    // Keep a single entry per old commit. Git can write several for the same
+    // commit (e.g. a conflicted merge that is then continued), and readers keep
+    // the last one, so a later stale entry would override the new mapping.
+    let mut new_entries: Vec<(NonZeroOid, MaybeZeroOid)> = Vec::new();
+    let mut entry_indexes: HashMap<NonZeroOid, usize> = HashMap::new();
+    for (old_commit_oid, new_commit_oid) in
+        current_entries.into_iter().chain(entries.iter().copied())
+    {
+        match entry_indexes.get(&old_commit_oid) {
+            Some(&index) => new_entries[index].1 = new_commit_oid,
+            None => {
+                entry_indexes.insert(old_commit_oid, new_entries.len());
+                new_entries.push((old_commit_oid, new_commit_oid));
+            }
+        }
     }
-    new_entries.extend(entries_to_add.into_iter());
 
     write_rewritten_list(tempfile_dir, rewritten_list_path, new_entries.as_slice())?;
     Ok(())
@@ -131,7 +138,7 @@ pub fn hook_post_rewrite(
 
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = event_log_db.make_transaction_id(now, "hook-post-rewrite")?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, "hook-post-rewrite")?;
 
     let (rewritten_oids, rewrite_events) = {
         let rewritten_oids = read_rewritten_list_entries(&mut stdin().lock())?;
@@ -434,6 +441,56 @@ pub fn hook_register_extra_post_rewrite_hook() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Restore the original author and committer timestamps after an on-disk pick or
+/// merge. Git's `cdate_is_adate` option does not preserve the committer date.
+pub fn hook_preserve_commit_timestamps(original_commit_oid: NonZeroOid) -> eyre::Result<()> {
+    let repo = Repo::from_current_dir()?;
+    let original_commit = repo.find_commit_or_fail(original_commit_oid)?;
+    let head_oid = repo
+        .get_head_info()?
+        .oid
+        .ok_or_else(|| eyre::eyre!("No HEAD commit while preserving timestamps"))?;
+    let head_commit = repo.find_commit_or_fail(head_oid)?;
+    let tree = head_commit.get_tree()?;
+    let parents = head_commit.get_parents();
+    let message = head_commit.get_message_raw();
+    let message =
+        std::str::from_utf8(message.as_ref()).wrap_err("Reading the rewritten commit message")?;
+
+    let rewritten_oid = repo.create_commit(
+        None,
+        &original_commit.get_author(),
+        &original_commit.get_committer(),
+        message,
+        &tree,
+        parents.iter().collect(),
+    )?;
+    if rewritten_oid == head_oid {
+        return Ok(());
+    }
+
+    // `set_head` doesn't run the reference-transaction hook, so mark the new
+    // commit reachable here like the in-memory rebase does.
+    mark_commit_reachable(&repo, rewritten_oid)?;
+    let tempfile_dir = repo.get_tempfile_dir()?;
+    let rewritten_list_path = repo.get_rebase_state_dir_path().join("rewritten-list");
+    repo.set_head(rewritten_oid)?;
+
+    // Override the sequencer's intermediate mapping so post-rewrite moves
+    // branches to the commit with the correct timestamps. Git doesn't rerun a
+    // failed exec on `git rebase --continue`, so if this fails, restore HEAD to
+    // keep it consistent with the sequencer's own mapping.
+    if let Err(err) = add_rewritten_list_entries(
+        &tempfile_dir,
+        &rewritten_list_path,
+        &[(original_commit_oid, MaybeZeroOid::NonZero(rewritten_oid))],
+    ) {
+        repo.set_head(head_oid)?;
+        return Err(err);
+    }
+    Ok(())
+}
+
 /// For rebases, detect empty commits (which have probably been applied
 /// upstream) and write them to the `rewritten-list` file, so that they're later
 /// passed to the `post-rewrite` hook.
@@ -524,4 +581,38 @@ pub fn hook_skip_upstream_applied_commit(
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_rewritten_list_entries_replaces_duplicates() -> eyre::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let rewritten_list_path = dir.path().join("rewritten-list");
+        let old: NonZeroOid = "1111111111111111111111111111111111111111".parse()?;
+        let other: NonZeroOid = "2222222222222222222222222222222222222222".parse()?;
+        std::fs::write(
+            &rewritten_list_path,
+            format!(
+                "{old} 3333333333333333333333333333333333333333\n\
+                 {other} 4444444444444444444444444444444444444444\n\
+                 {old} 5555555555555555555555555555555555555555\n"
+            ),
+        )?;
+
+        let new: MaybeZeroOid = "6666666666666666666666666666666666666666".parse()?;
+        add_rewritten_list_entries(&dir.path().join("tmp"), &rewritten_list_path, &[(old, new)])?;
+
+        let entries = read_rewritten_list_entries(&mut File::open(&rewritten_list_path)?)?;
+        assert_eq!(
+            entries,
+            vec![
+                (old, new),
+                (other, "4444444444444444444444444444444444444444".parse()?),
+            ]
+        );
+        Ok(())
+    }
 }

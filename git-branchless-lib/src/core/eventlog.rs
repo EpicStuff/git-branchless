@@ -25,6 +25,28 @@ use super::repo_ext::RepoReferencesSnapshot;
 /// which the caller has already started.
 pub const BRANCHLESS_TRANSACTION_ID_ENV_VAR: &str = "BRANCHLESS_TRANSACTION_ID";
 
+/// Persist the transaction ID with the Git sequencer so a manual
+/// `git rebase --continue` can use the same transaction after a conflict.
+pub const BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME: &str = "branchless_transaction_id";
+
+/// Read the ID for a Branchless-managed on-disk rebase. Ordinary Git rebases
+/// do not have this file, so their hooks create transactions as usual.
+pub fn get_rebase_transaction_id(repo: &Repo) -> eyre::Result<Option<EventTransactionId>> {
+    let path = repo
+        .get_rebase_state_dir_path()
+        .join(BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME);
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).wrap_err_with(|| format!("Reading {:?}", path)),
+    };
+    let event_tx_id: EventTransactionId = contents
+        .trim()
+        .parse()
+        .wrap_err_with(|| format!("Parsing transaction ID at {:?}", path))?;
+    Ok(Some(event_tx_id))
+}
+
 // Wrapper around the row stored directly in the database.
 #[derive(Clone, Debug)]
 struct Row {
@@ -45,11 +67,8 @@ struct Row {
 /// experience for `git undo`, since the user probably wants to see or undo all
 /// of the logically-related events at once, rather than individually.
 ///
-/// Note that some logically-related events may not be included together in the
-/// same transaction. For example, if a rebase is interrupted due to a merge
-/// conflict, then the commits applied due to `git rebase` and the commits
-/// applied due to `git rebase --continue` may not share the same transaction.
-/// In this sense, a transaction is "best-effort".
+/// Branchless-managed on-disk rebases persist the transaction ID so their
+/// events also share a transaction across manual `git rebase --continue` calls.
 ///
 /// Unlike in a database, there is no specific guarantee that an event
 /// transaction is an atomic unit of work.
@@ -665,6 +684,29 @@ ORDER BY rowid ASC
         self.make_transaction_id_inner(now, message.as_ref())
     }
 
+    /// Get the transaction for a hook, restoring the original ID when Git
+    /// resumes a Branchless-managed rebase outside of the initial process.
+    /// Commands themselves continue to use `make_transaction_id`, so an
+    /// unrelated Branchless command during a paused rebase isn't grouped with
+    /// the rebase merely because the state file exists.
+    pub fn make_hook_transaction_id(
+        &self,
+        now: SystemTime,
+        message: impl AsRef<str>,
+    ) -> eyre::Result<EventTransactionId> {
+        if let Ok(transaction_id) = std::env::var(BRANCHLESS_TRANSACTION_ID_ENV_VAR) {
+            if let Ok(transaction_id) = transaction_id.parse::<EventTransactionId>() {
+                return Ok(transaction_id);
+            }
+        }
+        if let Ok(repo) = Repo::from_current_dir() {
+            if let Some(event_tx_id) = get_rebase_transaction_id(&repo)? {
+                return Ok(event_tx_id);
+            }
+        }
+        self.make_transaction_id_inner(now, message.as_ref())
+    }
+
     /// Get the message associated with the given transaction.
     pub fn get_transaction_message(&self, event_tx_id: EventTransactionId) -> eyre::Result<String> {
         let event_tx_id = match event_tx_id {
@@ -688,6 +730,25 @@ WHERE event_tx_id = :event_tx_id
             },
         )?;
         Ok(result)
+    }
+
+    /// Get the messages of the transactions made since the most recent
+    /// transaction with events (inclusive), newest first. Transactions can have
+    /// no events, e.g. read-only commands or reference updates made without
+    /// Git's hooks.
+    pub fn get_transaction_messages_since_last_event(&self) -> eyre::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "
+SELECT message
+FROM event_transactions
+WHERE event_tx_id >= (SELECT COALESCE(MAX(event_tx_id), 0) FROM event_log)
+ORDER BY event_tx_id DESC
+",
+        )?;
+        let messages = stmt
+            .query_map(rusqlite::params![], |row| row.get("message"))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(messages)
     }
 }
 
@@ -863,6 +924,16 @@ impl EventReplayer {
         self.id_counter += 1;
 
         match &event {
+            // A commit rewritten into itself, such as an unchanged commit
+            // which a rebase picked again, didn't change. Recording it would
+            // hide an earlier rewrite of the commit.
+            Event::RewriteEvent {
+                timestamp: _,
+                event_tx_id: _,
+                old_commit_oid,
+                new_commit_oid,
+            } if old_commit_oid == new_commit_oid => {}
+
             Event::RewriteEvent {
                 timestamp: _,
                 event_tx_id: _,

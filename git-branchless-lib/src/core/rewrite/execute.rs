@@ -963,15 +963,18 @@ mod in_memory {
 }
 
 mod on_disk {
+    use std::collections::HashSet;
     use std::fmt::Write;
 
     use eyre::Context;
     use tracing::instrument;
 
     use crate::core::effects::{Effects, OperationType};
+    use crate::core::eventlog::BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME;
     use crate::core::rewrite::plan::RebaseCommand;
     use crate::core::rewrite::plan::RebasePlan;
     use crate::core::rewrite::rewrite_hooks::save_original_head_info;
+    use crate::git::ConfigRead;
     use crate::git::{GitRunInfo, Repo};
 
     use crate::util::ExitCode;
@@ -992,7 +995,7 @@ mod on_disk {
     ) -> eyre::Result<Result<(), Error>> {
         let ExecuteRebasePlanOptions {
             now: _,
-            event_tx_id: _,
+            event_tx_id,
             preserve_timestamps,
             force_in_memory: _,
             force_on_disk: _,
@@ -1023,6 +1026,12 @@ mod on_disk {
                 &rebase_state_dir
             )
         })?;
+
+        // Preserve the transaction for manual rebase continuations, whose hooks
+        // do not inherit the original Branchless process environment.
+        let transaction_id_path = rebase_state_dir.join(BRANCHLESS_REBASE_TRANSACTION_ID_FILE_NAME);
+        std::fs::write(&transaction_id_path, event_tx_id.to_string())
+            .wrap_err_with(|| format!("Writing transaction ID to: {:?}", transaction_id_path))?;
 
         // Mark this rebase as an interactive rebase. For whatever reason, if this
         // is not marked as an interactive rebase, then some rebase plans fail with
@@ -1099,14 +1108,42 @@ mod on_disk {
             eyre::bail!("Not implemented: replacing commits in an on disk rebase");
         }
 
+        let mut todo_commands = Vec::new();
+        for command in &rebase_plan.commands {
+            let rebase_command = command.to_rebase_command();
+            // An empty command (a pick with no commits to apply) creates no
+            // commit, so there are no timestamps to restore on HEAD.
+            if rebase_command.is_empty() {
+                continue;
+            }
+            todo_commands.push(rebase_command);
+            if *preserve_timestamps {
+                let original_commit_oid = match command {
+                    RebaseCommand::Pick {
+                        original_commit_oid,
+                        commits_to_apply_oids: _,
+                    } => Some(original_commit_oid),
+                    RebaseCommand::Merge {
+                        commit_oid,
+                        commits_to_merge: _,
+                    } => Some(commit_oid),
+                    _ => None,
+                };
+                if let Some(original_commit_oid) = original_commit_oid {
+                    todo_commands.push(format!(
+                        "exec git branchless hook-preserve-commit-timestamps {original_commit_oid}"
+                    ));
+                }
+            }
+        }
+
         let todo_file_path = rebase_state_dir.join("git-rebase-todo");
         #[allow(clippy::format_collect)]
         std::fs::write(
             &todo_file_path,
-            rebase_plan
-                .commands
+            todo_commands
                 .iter()
-                .map(|command| format!("{}\n", command.to_rebase_command()))
+                .map(|command| format!("{command}\n"))
                 .collect::<String>(),
         )
         .wrap_err_with(|| {
@@ -1119,9 +1156,22 @@ mod on_disk {
         let end_file_path = rebase_state_dir.join("end");
         std::fs::write(
             end_file_path.as_path(),
-            format!("{}\n", rebase_plan.commands.len()),
+            format!("{}\n", todo_commands.len()),
         )
         .wrap_err_with(|| format!("Writing `end` to: {:?}", end_file_path.as_path()))?;
+
+        if *preserve_timestamps {
+            // Corresponds to `--reschedule-failed-exec`. Otherwise, if the
+            // timestamp hook fails, `git rebase --continue` skips it and the
+            // commit keeps the rebase-time committer timestamp.
+            let reschedule_failed_exec_file_path = rebase_state_dir.join("reschedule-failed-exec");
+            std::fs::write(&reschedule_failed_exec_file_path, "").wrap_err_with(|| {
+                format!(
+                    "Writing `reschedule-failed-exec` option file to: {:?}",
+                    &reschedule_failed_exec_file_path
+                )
+            })?;
+        }
 
         // Corresponds to the `--empty=keep` flag. We'll drop the commits later once
         // we find out that they're empty.
@@ -1132,16 +1182,6 @@ mod on_disk {
                 &keep_redundant_commits_file_path
             )
         })?;
-
-        if *preserve_timestamps {
-            let cdate_is_adate_file_path = rebase_state_dir.join("cdate_is_adate");
-            std::fs::write(&cdate_is_adate_file_path, "").wrap_err_with(|| {
-                format!(
-                    "Writing `cdate_is_adate` option file to: {:?}",
-                    &cdate_is_adate_file_path
-                )
-            })?;
-        }
 
         // Make sure we don't move around the current branch unintentionally. If it
         // actually needs to be moved, then it will be moved as part of the
@@ -1187,9 +1227,44 @@ mod on_disk {
             effects.get_output_stream(),
             "Calling Git for on-disk rebase..."
         )?;
-        match git_run_info.run(effects, Some(*event_tx_id), &["rebase", "--continue"])? {
-            Ok(()) => Ok(Ok(ExitCode::success())),
-            Err(err) => Ok(Ok(err)),
+        let rerere_autoupdate = repo
+            .get_readonly_config()?
+            .get_or("rerere.autoupdate", false)?;
+        let mut retried_conflicts = HashSet::new();
+        let mut retry_git_run_info = git_run_info.clone();
+        retry_git_run_info
+            .env
+            .insert("GIT_EDITOR".into(), ":".into());
+        let mut is_retry = false;
+        loop {
+            let run_info = if is_retry {
+                &retry_git_run_info
+            } else {
+                git_run_info
+            };
+            let exit_code =
+                match run_info.run(effects, Some(*event_tx_id), &["rebase", "--continue"])? {
+                    Ok(()) => return Ok(Ok(ExitCode::success())),
+                    Err(exit_code) => exit_code,
+                };
+
+            if !rerere_autoupdate || repo.get_index()?.has_conflicts() {
+                return Ok(Ok(exit_code));
+            }
+            let stopped_sha_path = repo.get_rebase_state_dir_path().join("stopped-sha");
+            let stopped_sha = match std::fs::read_to_string(stopped_sha_path) {
+                Ok(stopped_sha) => stopped_sha,
+                Err(_) => return Ok(Ok(exit_code)),
+            };
+            if !retried_conflicts.insert(stopped_sha) {
+                // A retry made no progress. Avoid looping on hook failures.
+                return Ok(Ok(exit_code));
+            }
+            writeln!(
+                effects.get_output_stream(),
+                "Rerere staged all conflicts; continuing rebase..."
+            )?;
+            is_retry = true;
         }
     }
 }

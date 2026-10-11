@@ -784,6 +784,61 @@ fn extract_checkout_target(
     Ok((checkout_target, new_events))
 }
 
+/// Prefix of the transaction message of an undo, followed by the ID of the
+/// event it restored the repository to.
+const UNDO_MESSAGE_PREFIX: &str = "undo to event ";
+
+/// Separates the transactions before that event which were also undone.
+const UNDO_MESSAGE_TRANSACTIONS_SEPARATOR: &str = " and transactions ";
+
+/// The state of the repository after a sequence of undos: every event from
+/// `event_id` on has been undone, as have the transactions in `event_tx_ids`.
+#[derive(Debug, Default)]
+struct UndoneEvents {
+    event_id: isize,
+    event_tx_ids: Vec<EventTransactionId>,
+}
+
+impl UndoneEvents {
+    fn to_message(&self) -> String {
+        let Self {
+            event_id,
+            event_tx_ids,
+        } = self;
+        let mut message = format!("{UNDO_MESSAGE_PREFIX}{event_id}");
+        if !event_tx_ids.is_empty() {
+            message.push_str(UNDO_MESSAGE_TRANSACTIONS_SEPARATOR);
+            message.push_str(
+                &event_tx_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+        message
+    }
+
+    fn from_message(message: &str) -> Option<Self> {
+        let message = message.strip_prefix(UNDO_MESSAGE_PREFIX)?;
+        let (event_id, event_tx_ids) = match message.split_once(UNDO_MESSAGE_TRANSACTIONS_SEPARATOR)
+        {
+            Some((event_id, event_tx_ids)) => (
+                event_id,
+                event_tx_ids
+                    .split(',')
+                    .map(|event_tx_id| event_tx_id.parse().ok())
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            None => (message, Vec::new()),
+        };
+        Some(Self {
+            event_id: event_id.parse().ok()?,
+            event_tx_ids,
+        })
+    }
+}
+
 #[instrument(skip(in_))]
 fn undo_events(
     in_: &mut impl Read,
@@ -793,30 +848,40 @@ fn undo_events(
     event_log_db: &mut EventLogDb,
     event_replayer: &EventReplayer,
     event_cursor: EventCursor,
+    only_event_tx_id: Option<EventTransactionId>,
+    undone_events: UndoneEvents,
     skip_confirmation: bool,
 ) -> EyreExitOr<()> {
     let now = SystemTime::now();
-    let event_tx_id = event_log_db.make_transaction_id(now, "undo")?;
     let head_info = repo.get_head_info()?;
-    let inverse_events: Vec<Event> = event_replayer
-        .get_events_since_cursor(event_cursor)
-        .iter()
-        .rev()
-        .filter(|event| {
-            !matches!(
-                event,
-                Event::RefUpdateEvent {
-                    timestamp: _,
-                    event_tx_id: _,
-                    ref_name,
-                    old_oid: MaybeZeroOid::Zero,
-                    new_oid: _,
-                    message: _,
-                } if ref_name.as_str() == "HEAD"
-            )
-        })
-        .map(|event| inverse_event(event.clone(), now, event_tx_id))
-        .collect::<eyre::Result<Vec<Event>>>()?;
+    let make_inverse_events = |event_tx_id| -> eyre::Result<Vec<Event>> {
+        event_replayer
+            .get_events_since_cursor(event_cursor)
+            .iter()
+            .rev()
+            .filter(|event| {
+                only_event_tx_id
+                    .is_none_or(|only_event_tx_id| event.get_event_tx_id() == only_event_tx_id)
+            })
+            .filter(|event| {
+                !matches!(
+                    event,
+                    Event::RefUpdateEvent {
+                        timestamp: _,
+                        event_tx_id: _,
+                        ref_name,
+                        old_oid: MaybeZeroOid::Zero,
+                        new_oid: _,
+                        message: _,
+                    } if ref_name.as_str() == "HEAD"
+                )
+            })
+            .map(|event| inverse_event(event.clone(), now, event_tx_id))
+            .collect()
+    };
+    // Only create the undo transaction once confirmed, since the next undo
+    // continues from the most recent one.
+    let inverse_events = make_inverse_events(EventTransactionId::Suppressed)?;
 
     if inverse_events.is_empty() {
         writeln!(
@@ -853,6 +918,11 @@ fn undo_events(
         writeln!(effects.get_output_stream(), "Aborted.")?;
         return Ok(Err(ExitCode(1)));
     }
+
+    // Record what has been undone, so that a following undo continues from
+    // there instead of undoing this undo.
+    let event_tx_id = event_log_db.make_transaction_id(now, undone_events.to_message())?;
+    let inverse_events = make_inverse_events(event_tx_id)?;
 
     let num_inverse_events = Pluralize {
         determiner: None,
@@ -975,17 +1045,74 @@ pub fn undo(
         )?
     };
 
-    let event_cursor = {
+    let (event_cursor, only_event_tx_id, undone_events) = {
         if interactive {
             let result = with_siv(effects, |effects, siv| {
                 select_past_event(siv, &effects, &repo, &dag, &mut event_replayer)
             })?;
             match result {
-                Some(event_cursor) => event_cursor,
+                Some(event_cursor) => (
+                    event_cursor,
+                    None,
+                    cursor_undone_events(&event_replayer, event_cursor),
+                ),
                 None => return Ok(Ok(())),
             }
         } else {
-            event_replayer.advance_cursor_by_transaction(event_replayer.make_default_cursor(), -1)
+            // If the last transaction was an undo, keep going back from the
+            // state it restored rather than undoing the undo.
+            let undone_events = event_log_db
+                .get_transaction_messages_since_last_event()?
+                .into_iter()
+                .find_map(|message| UndoneEvents::from_message(&message));
+            let UndoneEvents {
+                event_id,
+                mut event_tx_ids,
+            } = undone_events.unwrap_or_else(|| UndoneEvents {
+                event_id: event_replayer
+                    .get_event_before_cursor(event_replayer.make_default_cursor())
+                    .map_or(0, |(event_id, _)| event_id),
+                event_tx_ids: Vec::new(),
+            });
+
+            // Undo the newest transaction which is still applied. Its events
+            // aren't necessarily contiguous (e.g. an unrelated command while a
+            // rebase is paused), so revert only its events, starting from its
+            // first one.
+            let events = event_replayer.get_events_since_cursor(event_replayer.make_cursor(0));
+            let events = &events[..events.len().min(event_id.try_into()?)];
+            match events
+                .iter()
+                .rev()
+                .map(|event| event.get_event_tx_id())
+                .find(|event_tx_id| !event_tx_ids.contains(event_tx_id))
+            {
+                Some(event_tx_id @ EventTransactionId::Id(_)) => {
+                    let first_event_id = events
+                        .iter()
+                        .position(|event| event.get_event_tx_id() == event_tx_id)
+                        .expect("An event has this transaction ID");
+                    event_tx_ids.push(event_tx_id);
+                    (
+                        event_replayer.make_cursor(first_event_id.try_into()?),
+                        Some(event_tx_id),
+                        UndoneEvents {
+                            event_id,
+                            event_tx_ids,
+                        },
+                    )
+                }
+                _ => {
+                    // All recorded transactions have already been undone.
+                    // Going back by cursor would select events which were
+                    // previously undone and might undo older history again.
+                    writeln!(
+                        effects.get_output_stream(),
+                        "No undo actions to apply, exiting."
+                    )?;
+                    return Ok(Ok(()));
+                }
+            }
         }
     };
 
@@ -997,9 +1124,21 @@ pub fn undo(
         &mut event_log_db,
         &event_replayer,
         event_cursor,
+        only_event_tx_id,
+        undone_events,
         skip_confirmation,
     )?;
     Ok(result)
+}
+
+/// Undoing every event from `event_cursor` on.
+fn cursor_undone_events(event_replayer: &EventReplayer, event_cursor: EventCursor) -> UndoneEvents {
+    UndoneEvents {
+        event_id: event_replayer
+            .get_event_before_cursor(event_cursor)
+            .map_or(0, |(event_id, _)| event_id),
+        event_tx_ids: Vec::new(),
+    }
 }
 
 #[allow(missing_docs)]
@@ -1041,6 +1180,8 @@ pub mod testing {
             event_log_db,
             event_replayer,
             event_cursor,
+            None,
+            super::cursor_undone_events(event_replayer, event_cursor),
             false,
         )
     }

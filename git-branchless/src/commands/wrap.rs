@@ -7,7 +7,9 @@ use std::time::SystemTime;
 use eyre::Context;
 use itertools::Itertools;
 
-use lib::core::eventlog::{BRANCHLESS_TRANSACTION_ID_ENV_VAR, EventLogDb, EventTransactionId};
+use lib::core::eventlog::{
+    BRANCHLESS_TRANSACTION_ID_ENV_VAR, EventLogDb, EventTransactionId, get_rebase_transaction_id,
+};
 use lib::git::{GitRunInfo, Repo};
 use lib::util::{ExitCode, EyreExitOr};
 
@@ -52,16 +54,42 @@ fn pass_through_git_command<S: AsRef<str> + std::fmt::Debug>(
 }
 
 fn make_event_tx_id<S: AsRef<str> + std::fmt::Debug>(
+    git_run_info: &GitRunInfo,
     args: &[S],
 ) -> eyre::Result<EventTransactionId> {
     let now = SystemTime::now();
-    let repo = Repo::from_current_dir()?;
+
+    // Skip Git's global options (such as `-c name=value`) to find the
+    // subcommand, following any `-C <path>` to the repository Git will use.
+    let mut repo_dir = git_run_info.working_directory.clone();
+    let mut args = args.iter().map(AsRef::as_ref);
+    let subcommand = loop {
+        match args.next() {
+            Some("-C") => {
+                if let Some(path) = args.next() {
+                    repo_dir.push(path);
+                }
+            }
+            Some("-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env") => {
+                args.next();
+            }
+            Some(arg) if arg.starts_with('-') => {}
+            subcommand => break subcommand,
+        }
+    };
+    let repo = Repo::from_dir(&repo_dir)?;
+
+    // Continuing or aborting a Branchless-managed rebase should stay in the
+    // rebase's transaction rather than starting a new one, since hooks prefer
+    // the transaction ID passed in the environment.
+    if subcommand == Some("rebase") {
+        if let Some(event_tx_id) = get_rebase_transaction_id(&repo)? {
+            return Ok(event_tx_id);
+        }
+    }
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = {
-        let message = args.first().map(|s| s.as_ref()).unwrap_or("wrap");
-        event_log_db.make_transaction_id(now, message)?
-    };
+    let event_tx_id = event_log_db.make_transaction_id(now, subcommand.unwrap_or("wrap"))?;
     Ok(event_tx_id)
 }
 
@@ -72,7 +100,7 @@ pub fn wrap<S: AsRef<str> + std::fmt::Debug>(
 ) -> EyreExitOr<()> {
     // We may not be able to make an event transaction ID (such as if there is
     // no repository in the current directory). Ignore the error in that case.
-    let event_tx_id = make_event_tx_id(args).ok();
+    let event_tx_id = make_event_tx_id(git_run_info, args).ok();
 
     let exit_code = pass_through_git_command(git_run_info, args, event_tx_id)?;
     Ok(exit_code)

@@ -60,7 +60,120 @@ fn test_move_stick() -> eyre::Result<()> {
                 &test1_oid.to_string(),
             ],
         )?;
+        insta::assert_snapshot!(stdout, @"
+        Rebase plan: Some(
+            RebasePlan {
+                first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                commands: [
+                    Reset {
+                        target: Oid(
+                            NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                        ),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        commits_to_apply_oids: [
+                            NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                        commits_to_apply_oids: [
+                            NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                    },
+                    RegisterExtraPostRewriteHook,
+                ],
+            },
+        )
+        Attempting rebase in-memory...
+        [1/2] Committed as: 4838e49 create test3.txt
+        [2/2] Committed as: a248207 create test4.txt
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout a248207402822b7396cabe0f1011d8a7ce7daf1b --
+        In-memory rebase succeeded.
+        ");
+
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d create test1.txt
+        |\
+        | o 4838e49 create test3.txt
+        | |
+        | @ a248207 create test4.txt
+        |
+        O 96d1c37 (master) create test2.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_stick_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+
+    git.detach_head()?;
+    let test3_oid = git.commit_file("test3", 3)?;
+    git.commit_file("test4", 4)?;
+
+    // --on-disk
+    {
+        let git = git.duplicate_repo()?;
+        git.branchless(
+            "move",
+            &[
+                "--on-disk",
+                "-s",
+                &test3_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d create test1.txt
+        |\
+        | o 4838e49 create test3.txt
+        | |
+        | @ a248207 create test4.txt
+        |
+        O 96d1c37 (master) create test2.txt
+        "###);
+    }
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--debug-dump-rebase-plan",
+                "-s",
+                &test3_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @r"
         Rebase plan: Some(
             RebasePlan {
                 first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
@@ -106,7 +219,7 @@ fn test_move_stick() -> eyre::Result<()> {
         |
         O 96d1c37 (master) create test2.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
@@ -195,7 +308,145 @@ fn test_move_insert_stick() -> eyre::Result<()> {
                 &test1_oid.to_string(),
             ],
         )?;
+        insta::assert_snapshot!(stdout, @"
+        Rebase plan: Some(
+            RebasePlan {
+                first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                commands: [
+                    Reset {
+                        target: Oid(
+                            NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                        ),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        commits_to_apply_oids: [
+                            NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                        commits_to_apply_oids: [
+                            NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        commits_to_apply_oids: [
+                            NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                    },
+                    RegisterExtraPostRewriteHook,
+                ],
+            },
+        )
+        Attempting rebase in-memory...
+        [1/3] Committed as: 4838e49 create test3.txt
+        [2/3] Committed as: a248207 create test4.txt
+        [3/3] Committed as: 5a436ed create test2.txt
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout a248207402822b7396cabe0f1011d8a7ce7daf1b --
+        In-memory rebase succeeded.
+        ");
+
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |
+        o 4838e49 create test3.txt
+        |
+        @ a248207 create test4.txt
+        |
+        o 5a436ed create test2.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_insert_stick_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.detach_head()?;
+
+    git.commit_file("test2", 2)?;
+    let test3_oid = git.commit_file("test3", 3)?;
+    git.commit_file("test4", 4)?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    :
+    O 62fc20d (master) create test1.txt
+    |
+    o 96d1c37 create test2.txt
+    |
+    o 70deb1e create test3.txt
+    |
+    @ 355e173 create test4.txt
+    "###);
+
+    // --on-disk
+    {
+        let git = git.duplicate_repo()?;
+        git.branchless(
+            "move",
+            &[
+                "--on-disk",
+                "--insert",
+                "-s",
+                &test3_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |
+        o 4838e49 create test3.txt
+        |
+        @ a248207 create test4.txt
+        |
+        o 5a436ed create test2.txt
+        "###);
+    }
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--insert",
+                // "--debug-dump-rebase-constraints",
+                "--debug-dump-rebase-plan",
+                "-s",
+                &test3_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Rebase plan: Some(
             RebasePlan {
                 first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
@@ -251,7 +502,7 @@ fn test_move_insert_stick() -> eyre::Result<()> {
         |
         o 5a436ed create test2.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
@@ -2279,7 +2530,125 @@ fn test_move_with_source_not_in_smartlog() -> eyre::Result<()> {
                     &test1_oid.to_string(),
                 ],
             )?;
+            insta::assert_snapshot!(stdout, @"
+            Rebase plan: Some(
+                RebasePlan {
+                    first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                    commands: [
+                        Reset {
+                            target: Oid(
+                                NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                            ),
+                        },
+                        Pick {
+                            original_commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                            commits_to_apply_oids: [
+                                NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                            ],
+                        },
+                        DetectEmptyCommit {
+                            commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        },
+                        Pick {
+                            original_commit_oid: NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                            commits_to_apply_oids: [
+                                NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                            ],
+                        },
+                        DetectEmptyCommit {
+                            commit_oid: NonZeroOid(355e173bf9c5d2efac2e451da0cdad3fb82b869a),
+                        },
+                        RegisterExtraPostRewriteHook,
+                    ],
+                },
+            )
+            Attempting rebase in-memory...
+            [1/2] Committed as: 4838e49 create test3.txt
+            [2/2] Committed as: a248207 create test4.txt
+            branchless: processing 1 update: branch master
+            branchless: processing 2 rewritten commits
+            branchless: running command: <git-executable> checkout master --
+            In-memory rebase succeeded.
+            ");
+        }
+
+        {
+            let stdout = git.smartlog()?;
             insta::assert_snapshot!(stdout, @r###"
+            :
+            O 62fc20d create test1.txt
+            |\
+            : o 96d1c37 create test2.txt
+            :
+            @ a248207 (> master) create test4.txt
+            "###);
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_with_source_not_in_smartlog_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+
+    let test3_oid = git.commit_file("test3", 3)?;
+    git.commit_file("test4", 4)?;
+
+    // on-disk
+    {
+        let git = git.duplicate_repo()?;
+
+        git.branchless(
+            "move",
+            &[
+                "--on-disk",
+                "-f",
+                "-s",
+                &test3_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+
+        {
+            let stdout = git.smartlog()?;
+            insta::assert_snapshot!(stdout, @r###"
+            :
+            O 62fc20d create test1.txt
+            |\
+            : o 96d1c37 create test2.txt
+            :
+            @ a248207 (> master) create test4.txt
+            "###);
+        }
+    }
+
+    // --in-memory
+    {
+        {
+            let (stdout, _stderr) = git.branchless(
+                "move",
+                &[
+                    "--in-memory",
+                    "--debug-dump-rebase-plan",
+                    "-f",
+                    "-s",
+                    &test3_oid.to_string(),
+                    "-d",
+                    &test1_oid.to_string(),
+                ],
+            )?;
+            insta::assert_snapshot!(stdout, @r"
             Rebase plan: Some(
                 RebasePlan {
                     first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
@@ -2324,7 +2693,7 @@ fn test_move_with_source_not_in_smartlog() -> eyre::Result<()> {
             :
             @ a248207 (> master) create test4.txt
             In-memory rebase succeeded.
-            "###);
+            ");
         }
 
         {
@@ -2427,7 +2796,7 @@ fn test_move_merge_conflict() -> eyre::Result<()> {
     {
         let (stdout, _stderr) = git.run(&["rebase", "--continue"])?;
         insta::assert_snapshot!(stdout, @r###"
-        [detached HEAD 42951b5] create conflict.txt
+        [detached HEAD 244e2bd] create conflict.txt
          1 file changed, 1 insertion(+), 1 deletion(-)
         "###);
     }
@@ -2465,7 +2834,82 @@ fn test_move_base() -> eyre::Result<()> {
             "move",
             &["--debug-dump-rebase-plan", "--base", &test3_oid.to_string()],
         )?;
+        insta::assert_snapshot!(stdout, @"
+        Rebase plan: Some(
+            RebasePlan {
+                first_dest_oid: NonZeroOid(bf0d52a607f693201512a43b6b5a70b2a275e0ad),
+                commands: [
+                    Reset {
+                        target: Oid(
+                            NonZeroOid(bf0d52a607f693201512a43b6b5a70b2a275e0ad),
+                        ),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        commits_to_apply_oids: [
+                            NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        commits_to_apply_oids: [
+                            NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(70deb1e28791d8e7dd5a1f0c871a51b91282562f),
+                    },
+                    RegisterExtraPostRewriteHook,
+                ],
+            },
+        )
+        Attempting rebase in-memory...
+        [1/2] Committed as: 44352d0 create test2.txt
+        [2/2] Committed as: cf5eb24 create test3.txt
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout master --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        @ bf0d52a (> master) create test4.txt
+        |
+        o 44352d0 create test2.txt
+        |
+        o cf5eb24 create test3.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_base_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    git.commit_file("test2", 2)?;
+    let test3_oid = git.commit_file("test3", 3)?;
+    git.run(&["checkout", "master"])?;
+    git.commit_file("test4", 4)?;
+
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["--debug-dump-rebase-plan", "--base", &test3_oid.to_string()],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Rebase plan: Some(
             RebasePlan {
                 first_dest_oid: NonZeroOid(bf0d52a607f693201512a43b6b5a70b2a275e0ad),
@@ -2509,7 +2953,7 @@ fn test_move_base() -> eyre::Result<()> {
         |
         o cf5eb24 create test3.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {
@@ -2555,7 +2999,64 @@ fn test_move_base_shared() -> eyre::Result<()> {
         HEAD is now at 355e173 create test4.txt
         branchless: processing checkout
         "###);
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: 70deb1e create test3.txt
+        [2/2] Committed as: 355e173 create test4.txt
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout 355e173bf9c5d2efac2e451da0cdad3fb82b869a --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        O f777ecc (master) create initial.txt
+        |
+        o 62fc20d create test1.txt
+        |
+        o 96d1c37 create test2.txt
+        |
+        o 70deb1e create test3.txt
+        |
+        @ 355e173 create test4.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_base_shared_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+    git.run(&["config", "branchless.restack.preserveTimestamps", "true"])?;
+
+    git.detach_head()?;
+    git.commit_file("test1", 1)?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.run(&["checkout", "HEAD~"])?;
+    git.commit_file("test3", 3)?;
+    git.commit_file("test4", 4)?;
+
+    {
+        let (stdout, stderr) =
+            git.branchless("move", &["-b", "HEAD", "-d", &test2_oid.to_string()])?;
+        insta::assert_snapshot!(stderr, @r###"
+        branchless: creating working copy snapshot
+        Previous HEAD position was a248207 create test4.txt
+        branchless: processing 1 update: ref HEAD
+        HEAD is now at 355e173 create test4.txt
+        branchless: processing checkout
+        "###);
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: 70deb1e create test3.txt
         [2/2] Committed as: 355e173 create test4.txt
@@ -2571,7 +3072,7 @@ fn test_move_base_shared() -> eyre::Result<()> {
         |
         @ 355e173 create test4.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {
@@ -2605,7 +3106,65 @@ fn test_move_checkout_new_head() -> eyre::Result<()> {
     {
         let (stdout, _stderr) =
             git.branchless("move", &["--debug-dump-rebase-plan", "-d", "master"])?;
+        insta::assert_snapshot!(stdout, @"
+        Rebase plan: Some(
+            RebasePlan {
+                first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                commands: [
+                    Reset {
+                        target: Oid(
+                            NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
+                        ),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(fe65c1fe15584744e649b2c79d4cf9b0d878f92e),
+                        commits_to_apply_oids: [
+                            NonZeroOid(fe65c1fe15584744e649b2c79d4cf9b0d878f92e),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(fe65c1fe15584744e649b2c79d4cf9b0d878f92e),
+                    },
+                    RegisterExtraPostRewriteHook,
+                ],
+            },
+        )
+        Attempting rebase in-memory...
+        [1/1] Committed as: 96d1c37 create test2.txt
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout 96d1c37a3d4363611c49f7e52186e189a04c531f --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |
+        @ 96d1c37 create test2.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_checkout_new_head_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.branchless("prev", &[])?;
+    git.commit_file("test2", 2)?;
+
+    {
+        let (stdout, _stderr) =
+            git.branchless("move", &["--debug-dump-rebase-plan", "-d", "master"])?;
+        insta::assert_snapshot!(stdout, @"
         Rebase plan: Some(
             RebasePlan {
                 first_dest_oid: NonZeroOid(62fc20d2a290daea0d52bdc2ed2ad4be6491010e),
@@ -2637,7 +3196,7 @@ fn test_move_checkout_new_head() -> eyre::Result<()> {
         |
         @ 96d1c37 create test2.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {
@@ -2681,7 +3240,84 @@ fn test_move_branch() -> eyre::Result<()> {
                 "-f",
             ],
         )?;
+        insta::assert_snapshot!(stdout, @"
+        Rebase plan: Some(
+            RebasePlan {
+                first_dest_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                commands: [
+                    Reset {
+                        target: Oid(
+                            NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        ),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(98b9119d16974f372e76cb64a3b77c528fc0b18b),
+                        commits_to_apply_oids: [
+                            NonZeroOid(98b9119d16974f372e76cb64a3b77c528fc0b18b),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(98b9119d16974f372e76cb64a3b77c528fc0b18b),
+                    },
+                    RegisterExtraPostRewriteHook,
+                ],
+            },
+        )
+        Attempting rebase in-memory...
+        [1/1] Committed as: 70deb1e create test3.txt
+        branchless: processing 1 update: branch master
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout master --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        @ 70deb1e (> master) create test3.txt
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.run(&["branch", "--show-current"])?;
+        assert_eq!(stdout, "master\n");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_branch_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    git.commit_file("test1", 1)?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.run(&["checkout", "master"])?;
+
+    git.commit_file("test3", 3)?;
+
+    {
+        let (stdout, _stderr) = git.run(&["branch", "--show-current"])?;
+        insta::assert_snapshot!(stdout, @"master");
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--debug-dump-rebase-plan",
+                "-d",
+                &test2_oid.to_string(),
+                "-f",
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Rebase plan: Some(
             RebasePlan {
                 first_dest_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
@@ -2712,7 +3348,7 @@ fn test_move_branch() -> eyre::Result<()> {
         :
         @ 70deb1e (> master) create test3.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {
@@ -2994,7 +3630,103 @@ fn test_move_in_memory_gc() -> eyre::Result<()> {
         HEAD is now at fe65c1f create test2.txt
         branchless: processing checkout
         "###);
+        insta::assert_snapshot!(stdout, @"
+        Rebase plan: Some(
+            RebasePlan {
+                first_dest_oid: NonZeroOid(f777ecc9b0db5ed372b2615695191a8a17f79f24),
+                commands: [
+                    Reset {
+                        target: Oid(
+                            NonZeroOid(f777ecc9b0db5ed372b2615695191a8a17f79f24),
+                        ),
+                    },
+                    Pick {
+                        original_commit_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        commits_to_apply_oids: [
+                            NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                        ],
+                    },
+                    DetectEmptyCommit {
+                        commit_oid: NonZeroOid(96d1c37a3d4363611c49f7e52186e189a04c531f),
+                    },
+                    RegisterExtraPostRewriteHook,
+                ],
+            },
+        )
+        Attempting rebase in-memory...
+        [1/1] Committed as: fe65c1f create test2.txt
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout fe65c1fe15584744e649b2c79d4cf9b0d878f92e --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    git.run(&["checkout", &test1_oid.to_string()])?;
+
+    {
+        let (stdout, stderr) = git.branchless("smartlog", &[])?;
+        insta::assert_snapshot!(stderr, @"");
         insta::assert_snapshot!(stdout, @r###"
+        O f777ecc (master) create initial.txt
+        |\
+        | @ 62fc20d create test1.txt
+        |
+        o fe65c1f create test2.txt
+        "###);
+    }
+
+    git.run(&["gc", "--prune=now"])?;
+
+    {
+        let (stdout, stderr) = git.branchless("smartlog", &[])?;
+        insta::assert_snapshot!(stderr, @"");
+        insta::assert_snapshot!(stdout, @r###"
+        O f777ecc (master) create initial.txt
+        |\
+        | @ 62fc20d create test1.txt
+        |
+        o fe65c1f create test2.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_in_memory_gc_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+
+    {
+        let (stdout, stderr) = git.branchless(
+            "move",
+            &[
+                "--debug-dump-rebase-plan",
+                "-s",
+                "HEAD",
+                "-d",
+                "master",
+                "--in-memory",
+            ],
+        )?;
+        insta::assert_snapshot!(stderr, @r###"
+        branchless: creating working copy snapshot
+        Previous HEAD position was 96d1c37 create test2.txt
+        branchless: processing 1 update: ref HEAD
+        HEAD is now at fe65c1f create test2.txt
+        branchless: processing checkout
+        "###);
+        insta::assert_snapshot!(stdout, @r"
         Rebase plan: Some(
             RebasePlan {
                 first_dest_oid: NonZeroOid(f777ecc9b0db5ed372b2615695191a8a17f79f24),
@@ -3027,7 +3759,7 @@ fn test_move_in_memory_gc() -> eyre::Result<()> {
         |
         @ fe65c1f create test2.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     git.run(&["checkout", &test1_oid.to_string()])?;
@@ -3088,7 +3820,97 @@ fn test_move_main_branch_commits() -> eyre::Result<()> {
                 &test1_oid.to_string(),
             ],
         )?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/3] Committed as: 4838e49 create test3.txt
+        [2/3] Committed as: a248207 create test4.txt
+        [3/3] Committed as: 566e434 create test5.txt
+        branchless: processing 1 update: branch master
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout master --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let stdout = git.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d create test1.txt
+        |\
+        : o 96d1c37 create test2.txt
+        :
+        @ 566e434 (> master) create test5.txt
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.run(&["log"])?;
+        insta::assert_snapshot!(stdout, @r###"
+        commit 566e4341a4a9a930fc2bf7ccdfa168e9f266c34a
+        Author: Testy McTestface <test@example.com>
+        Date:   Thu Oct 29 12:34:56 2020 -0500
+
+            create test5.txt
+
+        commit a248207402822b7396cabe0f1011d8a7ce7daf1b
+        Author: Testy McTestface <test@example.com>
+        Date:   Thu Oct 29 12:34:56 2020 -0400
+
+            create test4.txt
+
+        commit 4838e49b08954becdd17c0900c1179c2c654c627
+        Author: Testy McTestface <test@example.com>
+        Date:   Thu Oct 29 12:34:56 2020 -0300
+
+            create test3.txt
+
+        commit 62fc20d2a290daea0d52bdc2ed2ad4be6491010e
+        Author: Testy McTestface <test@example.com>
+        Date:   Thu Oct 29 12:34:56 2020 -0100
+
+            create test1.txt
+
+        commit f777ecc9b0db5ed372b2615695191a8a17f79f24
+        Author: Testy McTestface <test@example.com>
+        Date:   Thu Oct 29 12:34:56 2020 +0000
+
+            create initial.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_main_branch_commits_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    let test3_oid = git.commit_file("test3", 3)?;
+    git.commit_file("test4", 4)?;
+    git.commit_file("test5", 5)?;
+
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "-f",
+                "-s",
+                &test3_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @r"
         Attempting rebase in-memory...
         [1/3] Committed as: 4838e49 create test3.txt
         [2/3] Committed as: a248207 create test4.txt
@@ -3103,7 +3925,7 @@ fn test_move_main_branch_commits() -> eyre::Result<()> {
         :
         @ 566e434 (> master) create test5.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {
@@ -3237,16 +4059,6 @@ fn test_move_branches_after_move() -> eyre::Result<()> {
             insta::assert_snapshot!(stdout, @r###"
             No abandoned commits to restack.
             No abandoned branches to restack.
-            :
-            O 62fc20d create test1.txt
-            |\
-            | o 4838e49 (foo) create test3.txt
-            | |
-            | o a248207 create test4.txt
-            | |
-            | @ 566e434 (bar) create test5.txt
-            |
-            O 96d1c37 (master) create test2.txt
             "###);
         }
     }
@@ -3307,16 +4119,6 @@ fn test_move_branches_after_move() -> eyre::Result<()> {
             insta::assert_snapshot!(stdout, @r###"
             No abandoned commits to restack.
             No abandoned branches to restack.
-            :
-            O 62fc20d create test1.txt
-            |\
-            | o 4838e49 (foo) create test3.txt
-            | |
-            | o a248207 create test4.txt
-            | |
-            | @ 566e434 (> bar) create test5.txt
-            |
-            O 96d1c37 (master) create test2.txt
             "###);
         }
     }
@@ -3390,7 +4192,98 @@ fn test_move_no_reapply_upstream_commits() -> eyre::Result<()> {
             HEAD is now at fa46633 create test2.txt
             branchless: processing checkout
             "###);
+            insta::assert_snapshot!(stdout, @"
+            Attempting rebase in-memory...
+            [1/2] Skipped commit (was already applied upstream): 62fc20d create test1.txt
+            [2/2] Committed as: fa46633 create test2.txt
+            branchless: processing 1 update: branch should-be-deleted
+            branchless: processing 2 rewritten commits
+            branchless: running command: <git-executable> checkout fa46633239bfa767036e41a77b67258286e4ddb9 --
+            In-memory rebase succeeded.
+            ");
+        }
+
+        {
+            let stdout = git.smartlog()?;
             insta::assert_snapshot!(stdout, @r###"
+            :
+            O 047b7ad (master) create test1.txt
+            |
+            @ fa46633 create test2.txt
+            "###);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_move_no_reapply_upstream_commits_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.run(&["branch", "should-be-deleted"])?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.run(&["checkout", "master"])?;
+    git.run(&["cherry-pick", &test1_oid.to_string()])?;
+    git.run(&["checkout", &test2_oid.to_string()])?;
+
+    // --on-disk
+    {
+        let git = git.duplicate_repo()?;
+
+        {
+            let (stdout, stderr) =
+                git.branchless("move", &["--on-disk", "-b", "HEAD", "-d", "master"])?;
+            insta::assert_snapshot!(stderr, @r###"
+            branchless: processing 1 update: ref HEAD
+            Executing: git branchless hook-skip-upstream-applied-commit 62fc20d2a290daea0d52bdc2ed2ad4be6491010e
+            branchless: processing 1 update: ref HEAD
+            Executing: git branchless hook-detect-empty-commit 96d1c37a3d4363611c49f7e52186e189a04c531f
+            Executing: git branchless hook-register-extra-post-rewrite-hook
+            branchless: processing 2 rewritten commits
+            branchless: processing 1 update: branch should-be-deleted
+            Successfully rebased and updated detached HEAD.
+            "###);
+            insta::assert_snapshot!(stdout, @r###"
+            branchless: running command: <git-executable> diff --quiet
+            Calling Git for on-disk rebase...
+            branchless: running command: <git-executable> rebase --continue
+            Skipping commit (was already applied upstream): 62fc20d create test1.txt
+            "###);
+        }
+
+        {
+            let stdout = git.smartlog()?;
+            insta::assert_snapshot!(stdout, @r###"
+            :
+            O 047b7ad (master) create test1.txt
+            |
+            @ fa46633 create test2.txt
+            "###);
+        }
+    }
+
+    // --in-memory
+    {
+        {
+            let (stdout, stderr) =
+                git.branchless("move", &["--in-memory", "-b", "HEAD", "-d", "master"])?;
+            insta::assert_snapshot!(stderr, @r###"
+            branchless: creating working copy snapshot
+            Previous HEAD position was 96d1c37 create test2.txt
+            branchless: processing 1 update: ref HEAD
+            HEAD is now at fa46633 create test2.txt
+            branchless: processing checkout
+            "###);
+            insta::assert_snapshot!(stdout, @"
             Attempting rebase in-memory...
             [1/2] Skipped commit (was already applied upstream): 62fc20d create test1.txt
             [2/2] Committed as: fa46633 create test2.txt
@@ -3402,7 +4295,7 @@ fn test_move_no_reapply_upstream_commits() -> eyre::Result<()> {
             |
             @ fa46633 create test2.txt
             In-memory rebase succeeded.
-            "###);
+            ");
         }
 
         {
@@ -4482,7 +5375,51 @@ fn test_move_dest_not_in_dag() -> eyre::Result<()> {
 
         let (stdout, _stderr) = cloned_repo.branchless("move", &["-d", "origin/master", "-f"])?;
         let stdout = remove_rebase_lines(stdout);
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 70deb1e create test3.txt
+        branchless: processing 1 update: branch other-branch
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout other-branch --
+        Your branch and 'origin/other-branch' have diverged,
+        and have 2 and 1 different commits each, respectively.
+        In-memory rebase succeeded.
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_dest_not_in_dag_auto_print() -> eyre::Result<()> {
+    let GitWrapperWithRemoteRepo {
+        temp_dir: _guard,
+        original_repo,
+        cloned_repo,
+    } = make_git_with_remote_repo()?;
+
+    {
+        original_repo.init_repo()?;
+        original_repo.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+        original_repo.commit_file("test1", 1)?;
+        original_repo.commit_file("test2", 2)?;
+        original_repo.run(&["checkout", "-b", "other-branch", "HEAD^"])?;
+        original_repo.commit_file("test3", 3)?;
+
+        original_repo.clone_repo_into(&cloned_repo, &["--branch", "other-branch"])?;
+    }
+
+    {
+        cloned_repo.init_repo_with_options(&GitInitOptions {
+            make_initial_commit: false,
+            run_branchless_init: false,
+        })?;
+        cloned_repo.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+        cloned_repo.branchless("init", &["--main-branch", "other-branch"])?;
+
+        let (stdout, _stderr) = cloned_repo.branchless("move", &["-d", "origin/master", "-f"])?;
+        let stdout = remove_rebase_lines(stdout);
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Committed as: 70deb1e create test3.txt
         branchless: processing 1 update: branch other-branch
@@ -4493,7 +5430,7 @@ fn test_move_dest_not_in_dag() -> eyre::Result<()> {
         :
         @ 70deb1e (> other-branch) create test3.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     Ok(())
@@ -4607,11 +5544,43 @@ fn test_move_standalone_create_gc_refs() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) = git.run(&["show-ref"])?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        96d1c37a3d4363611c49f7e52186e189a04c531f refs/branchless/96d1c37a3d4363611c49f7e52186e189a04c531f
+        62fc20d2a290daea0d52bdc2ed2ad4be6491010e refs/heads/master
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_standalone_create_gc_refs_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    git.init_repo_with_options(&GitInitOptions {
+        run_branchless_init: false,
+        ..Default::default()
+    })?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+    let test1_oid = git.commit_file("test1", 1)?;
+    git.run(&["checkout", "HEAD^"])?;
+    git.commit_file("test2", 2)?;
+
+    {
+        let (stdout, _stderr) = git.run(&["show-ref"])?;
+        insta::assert_snapshot!(stdout, @"62fc20d2a290daea0d52bdc2ed2ad4be6491010e refs/heads/master
+");
+    }
+
+    git.branchless("move", &["-d", &test1_oid.to_string()])?;
+
+    {
+        let (stdout, _stderr) = git.run(&["show-ref"])?;
+        insta::assert_snapshot!(stdout, @"
         62fc20d2a290daea0d52bdc2ed2ad4be6491010e refs/branchless/62fc20d2a290daea0d52bdc2ed2ad4be6491010e
         96d1c37a3d4363611c49f7e52186e189a04c531f refs/branchless/96d1c37a3d4363611c49f7e52186e189a04c531f
         62fc20d2a290daea0d52bdc2ed2ad4be6491010e refs/heads/master
-        "###);
+        ");
     }
 
     Ok(())
@@ -4710,7 +5679,44 @@ fn test_move_revset() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) = git.branchless("move", &["-s", "draft()", "-d", "master"])?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        hint: you can omit the --dest flag in this case, as it defaults to HEAD
+        hint: disable this hint by running: git config --global branchless.hint.moveImplicitHeadArgument false
+        Attempting rebase in-memory...
+        [1/3] Committed as: d895922 create test2.txt
+        [2/3] Committed as: f387c23 create test3.txt
+        [3/3] Committed as: 9cb6a30 create test4.txt
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout master --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_revset_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    git.run(&["checkout", "--detach", "master"])?;
+    git.commit_file("test4", 4)?;
+    git.run(&["checkout", "master"])?;
+    git.commit_file("test5", 5)?;
+
+    {
+        let (stdout, _stderr) = git.branchless("move", &["-s", "draft()", "-d", "master"])?;
+        insta::assert_snapshot!(stdout, @r"
         hint: you can omit the --dest flag in this case, as it defaults to HEAD
         hint: disable this hint by running: git config --global branchless.hint.moveImplicitHeadArgument false
         Attempting rebase in-memory...
@@ -4728,7 +5734,7 @@ fn test_move_revset() -> eyre::Result<()> {
         |
         o 9cb6a30 create test4.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     Ok(())
@@ -4754,7 +5760,42 @@ fn test_move_revset_non_continguous() -> eyre::Result<()> {
             "move",
             &["-s", &format!("{test2_oid} | {test4_oid}"), "-d", "master^"],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/3] Committed as: 8f7aef5 create test4.txt
+        [2/3] Committed as: fe65c1f create test2.txt
+        [3/3] Committed as: 0206717 create test3.txt
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout 8f7aef57d66466a6e0737ae10f67cd98ddecdc66 --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_revset_non_continguous_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+    let test4_oid = git.commit_file("test4", 4)?;
+
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["-s", &format!("{test2_oid} | {test4_oid}"), "-d", "master^"],
+        )?;
+        insta::assert_snapshot!(stdout, @r"
         Attempting rebase in-memory...
         [1/3] Committed as: 8f7aef5 create test4.txt
         [2/3] Committed as: fe65c1f create test2.txt
@@ -4771,7 +5812,7 @@ fn test_move_revset_non_continguous() -> eyre::Result<()> {
         |
         O 62fc20d (master) create test1.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     Ok(())
@@ -4813,21 +5854,15 @@ fn test_move_hint() -> eyre::Result<()> {
             git.branchless("next", &["--newest"])?;
             let (stdout, _stderr) =
                 git.branchless("move", &["-b", ".", "-d", &test2_oid.to_string()])?;
-            insta::assert_snapshot!(stdout, @r###"
-        hint: you can omit the --base flag in this case, as it defaults to HEAD
-        hint: disable this hint by running: git config --global branchless.hint.moveImplicitHeadArgument false
-        Attempting rebase in-memory...
-        [1/1] Committed as: 70deb1e create test3.txt
-        branchless: processing 1 rewritten commit
-        branchless: running command: <git-executable> checkout 70deb1e28791d8e7dd5a1f0c871a51b91282562f --
-        :
-        O 62fc20d (master) create test1.txt
-        |
-        o 96d1c37 create test2.txt
-        |
-        @ 70deb1e create test3.txt
-        In-memory rebase succeeded.
-        "###);
+            insta::assert_snapshot!(stdout, @"
+            hint: you can omit the --base flag in this case, as it defaults to HEAD
+            hint: disable this hint by running: git config --global branchless.hint.moveImplicitHeadArgument false
+            Attempting rebase in-memory...
+            [1/1] Committed as: 70deb1e create test3.txt
+            branchless: processing 1 rewritten commit
+            branchless: running command: <git-executable> checkout 70deb1e28791d8e7dd5a1f0c871a51b91282562f --
+            In-memory rebase succeeded.
+            ");
             extract_hint_command(&stdout)
         };
 
@@ -4851,7 +5886,94 @@ fn test_move_hint() -> eyre::Result<()> {
         git.branchless("next", &["--newest"])?;
         let (stdout, _stderr) =
             git.branchless("move", &["-b", ".", "-d", &test2_oid.to_string()])?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 70deb1e create test3.txt
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout 70deb1e28791d8e7dd5a1f0c871a51b91282562f --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_hint_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    let test3_oid = git.commit_file("test3", 3)?;
+    git.run(&["checkout", "HEAD^^"])?;
+
+    let hint_command = {
+        let git = git.duplicate_repo()?;
+
+        let dest_hint_command = {
+            let (stdout, _stderr) =
+                git.branchless("move", &["-s", &test3_oid.to_string(), "-d", "."])?;
+            insta::assert_snapshot!(stdout, @r###"
+        hint: you can omit the --dest flag in this case, as it defaults to HEAD
+        hint: disable this hint by running: git config --global branchless.hint.moveImplicitHeadArgument false
+        Attempting rebase in-memory...
+        [1/1] Committed as: 4838e49 create test3.txt
+        branchless: processing 1 rewritten commit
+        In-memory rebase succeeded.
+        "###);
+            extract_hint_command(&stdout)
+        };
+
+        let base_hint_command = {
+            git.branchless("next", &["--newest"])?;
+            let (stdout, _stderr) =
+                git.branchless("move", &["-b", ".", "-d", &test2_oid.to_string()])?;
+            insta::assert_snapshot!(stdout, @"
+            hint: you can omit the --base flag in this case, as it defaults to HEAD
+            hint: disable this hint by running: git config --global branchless.hint.moveImplicitHeadArgument false
+            Attempting rebase in-memory...
+            [1/1] Committed as: 70deb1e create test3.txt
+            branchless: processing 1 rewritten commit
+            branchless: running command: <git-executable> checkout 70deb1e28791d8e7dd5a1f0c871a51b91282562f --
+            :
+            O 62fc20d (master) create test1.txt
+            |
+            o 96d1c37 create test2.txt
+            |
+            @ 70deb1e create test3.txt
+            In-memory rebase succeeded.
+            ");
+            extract_hint_command(&stdout)
+        };
+
+        assert_eq!(base_hint_command, dest_hint_command);
+        base_hint_command
+    };
+
+    git.run(&hint_command)?;
+
+    {
+        let (stdout, _stderr) =
+            git.branchless("move", &["-s", &test3_oid.to_string(), "-d", "."])?;
         insta::assert_snapshot!(stdout, @r###"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 4838e49 create test3.txt
+        branchless: processing 1 rewritten commit
+        In-memory rebase succeeded.
+        "###);
+    }
+    {
+        git.branchless("next", &["--newest"])?;
+        let (stdout, _stderr) =
+            git.branchless("move", &["-b", ".", "-d", &test2_oid.to_string()])?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Committed as: 70deb1e create test3.txt
         branchless: processing 1 rewritten commit
@@ -4863,7 +5985,7 @@ fn test_move_hint() -> eyre::Result<()> {
         |
         @ 70deb1e create test3.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     Ok(())
@@ -4900,7 +6022,53 @@ fn test_move_public_commit() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) = git.branchless("move", &["-x", ".^", "-f"])?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: fe65c1f create test2.txt
+        [2/2] Committed as: 0770943 create test1.txt
+        branchless: processing 1 update: branch master
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout master --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_public_commit_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+
+    {
+        let (stdout, _stderr) = git.branchless_with_options(
+            "move",
+            &["-x", ".^"],
+            &GitRunOptions {
+                expected_exit_code: 1,
+                ..Default::default()
+            },
+        )?;
         insta::assert_snapshot!(stdout, @r###"
+        You are trying to rewrite 2 public commits, such as: 96d1c37 create test2.txt
+        It is generally not advised to rewrite public commits, because your
+        collaborators will have difficulty merging your changes.
+        Retry with -f/--force-rewrite to proceed anyways.
+        "###);
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("move", &["-x", ".^", "-f"])?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: fe65c1f create test2.txt
         [2/2] Committed as: 0770943 create test1.txt
@@ -4912,7 +6080,7 @@ fn test_move_public_commit() -> eyre::Result<()> {
         |
         o 0770943 create test1.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     Ok(())
@@ -4940,7 +6108,50 @@ fn test_move_delete_branch_config_entry() -> eyre::Result<()> {
 
     {
         let (stdout, _stderr) = git.branchless("move", &["-d", "foo"])?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Skipped commit (was already applied upstream): 047b7ad create test1.txt
+        branchless: processing 1 update: branch bar
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout foo --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let (stdout, stderr) = git.run(&["config", "branch.foo.remote", "--default"])?;
+        insta::assert_snapshot!(stderr, @"");
         insta::assert_snapshot!(stdout, @r###"
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_delete_branch_config_entry_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    {
+        git.run(&["remote", "add", "self", "."])?;
+    }
+
+    git.run(&["checkout", "-b", "foo"])?;
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+    git.run(&["checkout", "master", "-b", "bar"])?;
+    git.run(&["cherry-pick", "foo^"])?;
+
+    {
+        let (stdout, _stderr) = git.run(&["config", "branch.foo.remote", "self"])?;
+        insta::assert_snapshot!(stdout, @"");
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless("move", &["-d", "foo"])?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Skipped commit (was already applied upstream): 047b7ad create test1.txt
         branchless: processing 1 update: branch bar
@@ -4952,7 +6163,7 @@ fn test_move_delete_branch_config_entry() -> eyre::Result<()> {
         |
         @ 96d1c37 (> foo) create test2.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {
@@ -5017,7 +6228,80 @@ fn test_move_fixup_head_into_parent() -> eyre::Result<()> {
                 &test2_oid.to_string(),
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 8c3aa56 update 2 test.txt
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout 8c3aa56b40afc7aa8b61ac5d6f6bff9fd8407896 --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1 +1,3 @@
+        +line 1
+         line 2
+        +line 3
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_head_into_parent_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents("test", 1, "line 2\n")?;
+    let test2_oid =
+        git.commit_file_with_contents_and_message("test", 2, "line 1\nline 2\n", "update 2")?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "line 1\nline 2\nline 3\n",
+        "update 3",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 307a04c create test.txt
+    |
+    o 6d92723 update 2 test.txt
+    |
+    @ da38dc8 update 3 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,2 +1,3 @@
+     line 1
+     line 2
+    +line 3
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-s",
+                "HEAD",
+                "-d",
+                &test2_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Committed as: 8c3aa56 update 2 test.txt
         branchless: processing 2 rewritten commits
@@ -5028,7 +6312,7 @@ fn test_move_fixup_head_into_parent() -> eyre::Result<()> {
         |
         @ 8c3aa56 update 2 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -5087,7 +6371,73 @@ fn test_move_fixup_parent_into_head() -> eyre::Result<()> {
             "move",
             &["--in-memory", "--fixup", "-x", &test2_oid.to_string()],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: ff6183f update 3 test.txt
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout ff6183fc6b71c3fcf6f26247162bde4e34bc5193 --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1 +1,3 @@
+        +line 1
+         line 2
+        +line 3
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_parent_into_head_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents("test", 1, "line 2\n")?;
+    let test2_oid =
+        git.commit_file_with_contents_and_message("test", 2, "line 1\nline 2\n", "update 2")?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "line 1\nline 2\nline 3\n",
+        "update 3",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 307a04c create test.txt
+    |
+    o 6d92723 update 2 test.txt
+    |
+    @ da38dc8 update 3 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,2 +1,3 @@
+     line 1
+     line 2
+    +line 3
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["--in-memory", "--fixup", "-x", &test2_oid.to_string()],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Committed as: ff6183f update 3 test.txt
         branchless: processing 2 rewritten commits
@@ -5098,7 +6448,7 @@ fn test_move_fixup_parent_into_head() -> eyre::Result<()> {
         |
         @ ff6183f update 3 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -5165,7 +6515,89 @@ fn test_move_fixup_head_into_ancestor() -> eyre::Result<()> {
                 &test1_oid.to_string(),
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: 963fb93 create test.txt
+        [2/2] Committed as: b9da1e0 update 2 test.txt
+        branchless: processing 1 update: branch test
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout 963fb93e7a4b7c53a1feb565106a1a4e5a298bf4 --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -0,0 +1,2 @@
+        +line 2
+        +line 3
+        "###);
+        let diff = git.get_trimmed_diff("test.txt", "test")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1,2 +1,3 @@
+        +line 1
+         line 2
+         line 3
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_head_into_ancestor_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file_with_contents("test", 1, "line 2\n")?;
+    let _test2_oid =
+        git.commit_file_with_contents_and_message("test", 2, "line 1\nline 2\n", "update 2")?;
+    git.run(&["branch", "test"])?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "line 1\nline 2\nline 3\n",
+        "update 3",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 307a04c create test.txt
+    |
+    o 6d92723 (test) update 2 test.txt
+    |
+    @ da38dc8 update 3 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,2 +1,3 @@
+     line 1
+     line 2
+    +line 3
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-s",
+                "HEAD",
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: 963fb93 create test.txt
         [2/2] Committed as: b9da1e0 update 2 test.txt
@@ -5178,7 +6610,7 @@ fn test_move_fixup_head_into_ancestor() -> eyre::Result<()> {
         |
         o b9da1e0 (test) update 2 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -5253,7 +6685,85 @@ fn test_move_fixup_ancestor_into_head() -> eyre::Result<()> {
             &["--in-memory", "--fixup", "-x", &test2_oid.to_string()],
         )?;
 
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: dbcd17a update 3 test.txt
+        [2/2] Committed as: 2b97091 update 4 test.txt
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout 2b970915e7142b451375b5df3dc7a02db6022357 --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1,2 +1,4 @@
+         line 1
+         line 2
+        +line 3
+        +line 4
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_ancestor_into_head_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents("test", 1, "line 2\n")?;
+    let test2_oid =
+        git.commit_file_with_contents_and_message("test", 2, "line 2\nline 3\n", "update 2")?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "line 1\nline 2\nline 3\n",
+        "update 3",
+    )?;
+    let _test4_oid = git.commit_file_with_contents_and_message(
+        "test",
+        4,
+        "line 1\nline 2\nline 3\nline 4\n",
+        "update 4",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 307a04c create test.txt
+    |
+    o 21819d4 update 2 test.txt
+    |
+    o 04a457d update 3 test.txt
+    |
+    @ b2a4062 update 4 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,3 +1,4 @@
+     line 1
+     line 2
+     line 3
+    +line 4
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["--in-memory", "--fixup", "-x", &test2_oid.to_string()],
+        )?;
+
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: dbcd17a update 3 test.txt
         [2/2] Committed as: 2b97091 update 4 test.txt
@@ -5267,7 +6777,7 @@ fn test_move_fixup_ancestor_into_head() -> eyre::Result<()> {
         |
         @ 2b97091 update 4 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -5332,7 +6842,78 @@ fn test_move_fixup_multiple_into_head() -> eyre::Result<()> {
                 &format!("{}+{}", test1_oid, test2_oid),
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: c4f6746 update 3 test.txt
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout c4f67465a26371b485ddd7eacfe61d0b962f92a6 --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -0,0 +1,3 @@
+        +line 1
+        +line 2
+        +line 3
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_multiple_into_head_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file_with_contents("test", 1, "line 1\n")?;
+    let test2_oid =
+        git.commit_file_with_contents_and_message("test", 2, "line 1\nline 2\n", "update 2")?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "line 1\nline 2\nline 3\n",
+        "update 3",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 1f31d98 create test.txt
+    |
+    o 73ae0c5 update 2 test.txt
+    |
+    @ 622207d update 3 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,2 +1,3 @@
+     line 1
+     line 2
+    +line 3
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-x",
+                &format!("{}+{}", test1_oid, test2_oid),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Committed as: c4f6746 update 3 test.txt
         branchless: processing 3 rewritten commits
@@ -5341,7 +6922,7 @@ fn test_move_fixup_multiple_into_head() -> eyre::Result<()> {
         |
         @ c4f6746 update 3 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -5423,7 +7004,105 @@ fn test_move_fixup_multiple_into_ancestor_with_unmoved_head() -> eyre::Result<()
                 &test1_oid.to_string(),
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: 23d4bdd create test.txt
+        [2/2] Committed as: 797ef91 update 4 test.txt
+        branchless: processing 4 rewritten commits
+        branchless: running command: <git-executable> checkout 797ef91eb97d58cc1898de8ddcdfc31388a8893e --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD~")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -0,0 +1,3 @@
+        +line 1
+        +line 2
+        +line 3
+        "###);
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1,3 +1,4 @@
+         line 1
+         line 2
+         line 3
+        +line 4
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_multiple_into_ancestor_with_unmoved_head_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let test1_oid = git.commit_file_with_contents("test", 1, "line 1\n")?;
+    let test2_oid =
+        git.commit_file_with_contents_and_message("test", 2, "line 1\nline 2\n", "update 2")?;
+    let test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "line 1\nline 2\nline 3\n",
+        "update 3",
+    )?;
+    let _test4_oid = git.commit_file_with_contents_and_message(
+        "test",
+        4,
+        "line 1\nline 2\nline 3\nline 4\n",
+        "update 4",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 1f31d98 create test.txt
+    |
+    o 73ae0c5 update 2 test.txt
+    |
+    o 622207d update 3 test.txt
+    |
+    @ a392af0 update 4 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD~")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,2 +1,3 @@
+     line 1
+     line 2
+    +line 3
+    "###);
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,3 +1,4 @@
+     line 1
+     line 2
+     line 3
+    +line 4
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-x",
+                &format!("{}+{}", test2_oid, test3_oid),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: 23d4bdd create test.txt
         [2/2] Committed as: 797ef91 update 4 test.txt
@@ -5435,7 +7114,7 @@ fn test_move_fixup_multiple_into_ancestor_with_unmoved_head() -> eyre::Result<()
         |
         @ 797ef91 update 4 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD~")?;
         insta::assert_snapshot!(diff, @r###"
@@ -5603,7 +7282,194 @@ fn test_move_fixup_multiple_disconnected_into_ancestor() -> eyre::Result<()> {
                 "test",
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/4] Committed as: 38caaaf create test.txt
+        [2/4] Committed as: 6783c86 update 2 test.txt
+        [3/4] Committed as: 7e2a64a update 4 test.txt
+        [4/4] Committed as: 472b70b update 6 test.txt
+        branchless: processing 1 update: branch test
+        branchless: processing 6 rewritten commits
+        branchless: running command: <git-executable> checkout 472b70be50d5c91210b3f2a089dbbb6af3a6bb71 --
+        In-memory rebase succeeded.
+        ");
+
+        // diff for "create test.txt"
+        let diff = git.get_trimmed_diff("test.txt", "test")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -0,0 +1,8 @@
+        +# Section A
+        +.
+        +.
+        +# Section B
+        +.
+        +.
+        +# Section 3
+        +Line C-1
+        "###);
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -5,5 +5,5 @@ Line A-1
+         Line B-1
+         Line B-2
+         .
+        -# Section 3
+        +# Section C
+         Line C-1
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_multiple_disconnected_into_ancestor_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents(
+        "test",
+        1,
+        "# Section A\n\
+         .\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section C\n\
+         ",
+    )?;
+    git.run(&["branch", "test"])?;
+    let _test2_oid = git.commit_file_with_contents_and_message(
+        "test",
+        2,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 2",
+    )?;
+    let test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section 3\n\
+         ",
+        "update 3",
+    )?;
+    let _test4_oid = git.commit_file_with_contents_and_message(
+        "test",
+        4,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section 3\n\
+         ",
+        "update 4",
+    )?;
+    let test5_oid = git.commit_file_with_contents_and_message(
+        "test",
+        5,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section 3\n\
+         Line C-1\n\
+         ",
+        "update 5",
+    )?;
+    let _test6_oid = git.commit_file_with_contents_and_message(
+        "test",
+        6,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section C\n\
+         Line C-1\n\
+         ",
+        "update 6",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 64eb9bf (test) create test.txt
+    |
+    o 087914d update 2 test.txt
+    |
+    o 7f8adf4 update 3 test.txt
+    |
+    o acf72de update 4 test.txt
+    |
+    o 1ff1932 update 5 test.txt
+    |
+    @ e982189 update 6 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "test")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -0,0 +1,7 @@
+    +# Section A
+    +.
+    +.
+    +# Section B
+    +.
+    +.
+    +# Section C
+    "###);
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -5,5 +5,5 @@ Line A-1
+     Line B-1
+     Line B-2
+     .
+    -# Section 3
+    +# Section C
+     Line C-1
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-x",
+                &format!("{}+{}", test3_oid, test5_oid),
+                "-d",
+                "test",
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/4] Committed as: 38caaaf create test.txt
         [2/4] Committed as: 6783c86 update 2 test.txt
@@ -5622,7 +7488,7 @@ fn test_move_fixup_multiple_disconnected_into_ancestor() -> eyre::Result<()> {
         |
         @ 472b70b update 6 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         // diff for "create test.txt"
         let diff = git.get_trimmed_diff("test.txt", "test")?;
@@ -5797,7 +7663,190 @@ fn test_move_fixup_multiple_disconnected_into_head() -> eyre::Result<()> {
                 &format!("{}+{}", test3_oid, test5_oid),
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: c21e0d7 update 4 test.txt
+        [2/2] Committed as: 237b381 update 6 test.txt
+        branchless: processing 1 update: branch test
+        branchless: processing 4 rewritten commits
+        branchless: running command: <git-executable> checkout 237b381bee4b7d2fdb4a300affdf9f5aa3e78a0c --
+        In-memory rebase succeeded.
+        ");
+
+        // diff for "update 4" should not include the changes from "update 3"
+        let diff = git.get_trimmed_diff("test.txt", "test")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -2,6 +2,7 @@
+         Line A-1
+         .
+         # Section B
+        -.
+        +Line B-1
+        +Line B-2
+         .
+         # Section C
+        "###);
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -6,3 +6,4 @@ Line B-1
+         Line B-2
+         .
+         # Section C
+        +Line C-1
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_multiple_disconnected_into_head_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents(
+        "test",
+        1,
+        "# Section A\n\
+         .\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section C\n\
+         ",
+    )?;
+    let _test2_oid = git.commit_file_with_contents_and_message(
+        "test",
+        2,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 2",
+    )?;
+    let test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section 3\n\
+         ",
+        "update 3",
+    )?;
+    let _test4_oid = git.commit_file_with_contents_and_message(
+        "test",
+        4,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section 3\n\
+         ",
+        "update 4",
+    )?;
+    git.run(&["branch", "test"])?;
+    let test5_oid = git.commit_file_with_contents_and_message(
+        "test",
+        5,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section 3\n\
+         Line C-1\n\
+         ",
+        "update 5",
+    )?;
+    let _test6_oid = git.commit_file_with_contents_and_message(
+        "test",
+        6,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section C\n\
+         Line C-1\n\
+         ",
+        "update 6",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 64eb9bf create test.txt
+    |
+    o 087914d update 2 test.txt
+    |
+    o 7f8adf4 update 3 test.txt
+    |
+    o acf72de (test) update 4 test.txt
+    |
+    o 1ff1932 update 5 test.txt
+    |
+    @ e982189 update 6 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "test")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -2,6 +2,7 @@
+     Line A-1
+     .
+     # Section B
+    -.
+    +Line B-1
+    +Line B-2
+     .
+     # Section 3
+    "###);
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -5,5 +5,5 @@ Line A-1
+     Line B-1
+     Line B-2
+     .
+    -# Section 3
+    +# Section C
+     Line C-1
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-x",
+                &format!("{}+{}", test3_oid, test5_oid),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: c21e0d7 update 4 test.txt
         [2/2] Committed as: 237b381 update 6 test.txt
@@ -5814,7 +7863,7 @@ fn test_move_fixup_multiple_disconnected_into_head() -> eyre::Result<()> {
         |
         @ 237b381 update 6 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         // diff for "update 4" should not include the changes from "update 3"
         let diff = git.get_trimmed_diff("test.txt", "test")?;
@@ -5915,7 +7964,102 @@ fn test_move_fixup_squash_branch() -> eyre::Result<()> {
                 &test1_oid.to_string(),
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: c513440 create test.txt
+        branchless: processing 1 update: branch test
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout test --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -0,0 +1,4 @@
+        +function name(): int
+        +{
+        +return 123;
+        +}
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_squash_branch_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.run(&["switch", "-c", "test"])?;
+    let test1_oid = git.commit_file_with_contents(
+        "test",
+        1,
+        "function name()\n\
+        {}\n\
+        ",
+    )?;
+    let test2_oid = git.commit_file_with_contents_and_message(
+        "test",
+        2,
+        "function name()\n\
+        {\n\
+        return 123;\n\
+        }\n\
+        ",
+        "update 2",
+    )?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "function name(): int\n\
+        {\n\
+        return 123;\n\
+        }\n\
+        ",
+        "update 3",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o a5407aa create test.txt
+    |
+    o 92c935b update 2 test.txt
+    |
+    @ 994e3c7 (> test) update 3 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,4 +1,4 @@
+    -function name()
+    +function name(): int
+     {
+     return 123;
+     }
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-s",
+                &test2_oid.to_string(),
+                "-d",
+                &test1_oid.to_string(),
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/1] Committed as: c513440 create test.txt
         branchless: processing 1 update: branch test
@@ -5925,7 +8069,7 @@ fn test_move_fixup_squash_branch() -> eyre::Result<()> {
         |
         @ c513440 (> test) create test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -6022,7 +8166,124 @@ fn test_move_fixup_branch_tip() -> eyre::Result<()> {
             "move",
             &["--in-memory", "--fixup", "-x", "test-3", "-d", "test-1"],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: f4321df create test.txt
+        [2/2] Committed as: 2746e2a update 2 test.txt
+        branchless: processing 3 updates: branch test-1, branch test-2, branch test-3
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout test-3 --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -0,0 +1,3 @@
+        +# Just a function
+        +function name()
+        +{}
+        "###);
+
+        // diff for "update 2"
+        let diff = git.get_trimmed_diff("test.txt", "test-2")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1,3 +1,5 @@
+         # Just a function
+         function name()
+        -{}
+        +{
+        +return 123;
+        +}
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_branch_tip_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents(
+        "test",
+        1,
+        "#\n\
+        function name()\n\
+        {}\n\
+        ",
+    )?;
+    git.run(&["branch", "test-1"])?;
+    let _test2_oid = git.commit_file_with_contents_and_message(
+        "test",
+        2,
+        "#\n\
+        function name()\n\
+        {\n\
+        return 123;\n\
+        }\n\
+        ",
+        "update 2",
+    )?;
+    git.run(&["branch", "test-2"])?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "# Just a function\n\
+        function name()\n\
+        {\n\
+        return 123;\n\
+        }\n\
+        ",
+        "update 3",
+    )?;
+    git.run(&["switch", "-c", "test-3"])?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 3c5d257 (test-1) create test.txt
+    |
+    o a84e38f (test-2) update 2 test.txt
+    |
+    @ 732f40d (> test-3) update 3 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,4 +1,4 @@
+    -#
+    +# Just a function
+     function name()
+     {
+     return 123;
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "test-2")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -1,3 +1,5 @@
+     #
+     function name()
+    -{}
+    +{
+    +return 123;
+    +}
+    "###);
+
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["--in-memory", "--fixup", "-x", "test-3", "-d", "test-1"],
+        )?;
+        insta::assert_snapshot!(stdout, @"
         Attempting rebase in-memory...
         [1/2] Committed as: f4321df create test.txt
         [2/2] Committed as: 2746e2a update 2 test.txt
@@ -6035,7 +8296,7 @@ fn test_move_fixup_branch_tip() -> eyre::Result<()> {
         |
         o 2746e2a (test-2) update 2 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
         insta::assert_snapshot!(diff, @r###"
@@ -6211,7 +8472,196 @@ fn test_move_fixup_tree() -> eyre::Result<()> {
                 "test",
             ],
         )?;
-        insta::assert_snapshot!(stdout, @r###"
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/3] Committed as: 5e6d3e4 update 7 test.txt
+        [2/3] Committed as: 59a95b3 update 4 test.txt
+        [3/3] Committed as: 1e7fdb8 update 5 test.txt
+        branchless: processing 1 update: branch test
+        branchless: processing 5 rewritten commits
+        branchless: running command: <git-executable> checkout 5e6d3e476b7c3dfb2e1344d8b13ef12523fc07af --
+        In-memory rebase succeeded.
+        ");
+
+        let diff = git.get_trimmed_diff("test.txt", "test")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -1,7 +1,8 @@
+         # Section A
+        +Line A-1
+         .
+        -.
+        -# Section B
+        +## Section A-2
+         Line B-1
+        +Line B-2
+         .
+         # Section C
+        "###);
+        let diff = git.get_trimmed_diff("test.txt", "HEAD")?;
+        insta::assert_snapshot!(diff, @r###"
+        @@ -5,3 +5,4 @@
+         Line B-1
+         .
+         # Section C
+        +Line C-1
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_tree_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_committer_date_is_author_date()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.detach_head()?;
+    let _test1_oid = git.commit_file_with_contents(
+        "test",
+        1,
+        "# Section A\n\
+         .\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section C\n\
+         ",
+    );
+    let test2_oid = git.commit_file_with_contents_and_message(
+        "test",
+        2,
+        "# Section A\n\
+         Line A-1\n\
+         .\n\
+         # Section B\n\
+         .\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 2",
+    )?;
+    git.run(&["checkout", "HEAD~"])?;
+    let _test3_oid = git.commit_file_with_contents_and_message(
+        "test",
+        3,
+        "# Section A\n\
+         .\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 3",
+    )?;
+    let _test4_oid = git.commit_file_with_contents_and_message(
+        "test",
+        4,
+        "# Section A\n\
+         .\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 4",
+    )?;
+    git.run(&["branch", "test"])?;
+    let _test5_oid = git.commit_file_with_contents_and_message(
+        "test",
+        5,
+        "# Section A\n\
+         .\n\
+         .\n\
+         # Section B\n\
+         Line B-1\n\
+         Line B-2\n\
+         Line B-3\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 5",
+    )?;
+    git.run(&["checkout", "HEAD~2"])?;
+    let test6_oid = git.commit_file_with_contents_and_message(
+        "test",
+        6,
+        "# Section A\n\
+         .\n\
+         .\n\
+         ## Section A-2\n\
+         Line B-1\n\
+         .\n\
+         # Section C\n\
+         ",
+        "update 6",
+    )?;
+    let _test7_oid = git.commit_file_with_contents_and_message(
+        "test",
+        7,
+        "# Section A\n\
+         .\n\
+         .\n\
+         ## Section A-2\n\
+         Line B-1\n\
+         .\n\
+         # Section C\n\
+         Line C-1\n\
+         ",
+        "update 7",
+    )?;
+
+    let stdout = git.smartlog()?;
+    insta::assert_snapshot!(stdout, @r###"
+    O f777ecc (master) create initial.txt
+    |
+    o 64eb9bf create test.txt
+    |\
+    | o 087914d update 2 test.txt
+    |
+    o b479fa3 update 3 test.txt
+    |\
+    | o 6c56aea (test) update 4 test.txt
+    | |
+    | o a1a58d0 update 5 test.txt
+    |
+    o 5f84b2f update 6 test.txt
+    |
+    @ 49b63ec update 7 test.txt
+    "###);
+
+    let diff = git.get_trimmed_diff("test.txt", "test")?;
+    insta::assert_snapshot!(diff, @r###"
+    @@ -3,5 +3,6 @@
+     .
+     # Section B
+     Line B-1
+    +Line B-2
+     .
+     # Section C
+    "###);
+    // --in-memory
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--in-memory",
+                "--fixup",
+                "-x",
+                &format!("{}+{}", test2_oid, test6_oid),
+                "-d",
+                "test",
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @r"
         Attempting rebase in-memory...
         [1/3] Committed as: 5e6d3e4 update 7 test.txt
         [2/3] Committed as: 59a95b3 update 4 test.txt
@@ -6231,7 +8681,7 @@ fn test_move_fixup_tree() -> eyre::Result<()> {
         |
         @ 5e6d3e4 update 7 test.txt
         In-memory rebase succeeded.
-        "###);
+        ");
 
         let diff = git.get_trimmed_diff("test.txt", "test")?;
         insta::assert_snapshot!(diff, @r###"
@@ -6308,7 +8758,40 @@ fn test_move_fixup_added_files() -> eyre::Result<()> {
         &["--in-memory", "--fixup", "-x", "HEAD", "-d", "HEAD~"],
     )?;
 
+    insta::assert_snapshot!(stdout, @"
+    Attempting rebase in-memory...
+    [1/1] Committed as: e9f8a2b create test1.txt
+    branchless: processing 2 rewritten commits
+    branchless: running command: <git-executable> checkout e9f8a2b1e4c72b2ca31c5f2feffabc947e2f1b5a --
+    In-memory rebase succeeded.
+    ");
+
+    let (stdout, _stderr) = git.run(&["ls-files"])?;
     insta::assert_snapshot!(stdout, @r###"
+    initial.txt
+    test1.txt
+    test2.txt
+    "###);
+
+    Ok(())
+}
+
+#[test]
+fn test_move_fixup_added_files_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+    git.detach_head()?;
+
+    git.commit_file("test1", 1)?;
+    git.commit_file("test2", 2)?;
+
+    let (stdout, _stderr) = git.branchless(
+        "move",
+        &["--in-memory", "--fixup", "-x", "HEAD", "-d", "HEAD~"],
+    )?;
+
+    insta::assert_snapshot!(stdout, @"
     Attempting rebase in-memory...
     [1/1] Committed as: e9f8a2b create test1.txt
     branchless: processing 2 rewritten commits
@@ -6317,7 +8800,7 @@ fn test_move_fixup_added_files() -> eyre::Result<()> {
     |
     @ e9f8a2b create test1.txt
     In-memory rebase succeeded.
-    "###);
+    ");
 
     let (stdout, _stderr) = git.run(&["ls-files"])?;
     insta::assert_snapshot!(stdout, @r###"
@@ -6333,6 +8816,145 @@ fn test_move_fixup_added_files() -> eyre::Result<()> {
 fn test_move_reparent() -> eyre::Result<()> {
     let git = make_git()?;
     git.init_repo()?;
+
+    git.detach_head()?;
+    let test1_branch = "test1-branch";
+    let test2_branch = "test2-branch";
+    let test3_branch = "test3-branch";
+    git.commit_file("test1", 1)?;
+    git.run(&["branch", test1_branch])?;
+    git.commit_file("test2_will_also_contain_test1_when_reparented", 2)?;
+    git.run(&["branch", test2_branch])?;
+    git.commit_file("test3_will_also_contain_test2_when_reparented", 3)?;
+    git.run(&["branch", test3_branch])?;
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r"
+        O f777ecc (master) create initial.txt
+        |
+        o 62fc20d (test1-branch) create test1.txt
+        |
+        o 06309ac (test2-branch) create test2_will_also_contain_test1_when_reparented.txt
+        |
+        @ f41e0bb (test3-branch) create test3_will_also_contain_test2_when_reparented.txt
+        ");
+    }
+
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["--source", test2_branch, "--dest", "master", "--reparent"],
+        )?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/2] Committed as: 40ca381 create test2_will_also_contain_test1_when_reparented.txt
+        [2/2] Committed as: e4eeed5 create test3_will_also_contain_test2_when_reparented.txt
+        branchless: processing 2 updates: branch test2-branch, branch test3-branch
+        branchless: processing 2 rewritten commits
+        branchless: running command: <git-executable> checkout test3-branch --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    git.branchless("prev", &[])?;
+    {
+        let (stdout, _stderr) = git.run(&["show", "--pretty=format:", "--stat", "HEAD"])?;
+        insta::assert_snapshot!(stdout, @r"
+        test1.txt                                         | 1 +
+        test2_will_also_contain_test1_when_reparented.txt | 1 +
+        2 files changed, 2 insertions(+)
+        ");
+    }
+
+    // test --reparent with --insert
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &[
+                "--source",
+                test3_branch,
+                "--dest",
+                "master",
+                "--reparent",
+                "--insert",
+            ],
+        )?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/3] Committed as: 3f0558d create test3_will_also_contain_test2_when_reparented.txt
+        [2/3] Committed as: e1e0b99 create test2_will_also_contain_test1_when_reparented.txt
+        [3/3] Committed as: fee6ba0 create test1.txt
+        branchless: processing 3 updates: branch test1-branch, branch test2-branch, branch test3-branch
+        branchless: processing 3 rewritten commits
+        branchless: running command: <git-executable> checkout test2-branch --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    // the reparented test3 contains everything, including test1 and test2
+    git.branchless("prev", &[])?;
+    {
+        let (stdout, _stderr) = git.run(&["show", "--pretty=format:", "--stat", "HEAD"])?;
+        insta::assert_snapshot!(stdout, @r"
+        test1.txt                                         | 1 +
+        test2_will_also_contain_test1_when_reparented.txt | 1 +
+        test3_will_also_contain_test2_when_reparented.txt | 1 +
+        3 files changed, 3 insertions(+)
+        ");
+    }
+
+    // the descendant test2 should come without test3 like before
+    {
+        let (stdout, _stderr) = git.run(&["show", "--pretty=format:", "--stat", test2_branch])?;
+        insta::assert_snapshot!(stdout, @r"
+        test3_will_also_contain_test2_when_reparented.txt | 1 -
+        1 file changed, 1 deletion(-)
+        ");
+    }
+
+    // similarly the descendant test1 should come without test1 and test2
+    {
+        let (stdout, _stderr) = git.run(&["show", "--pretty=format:", "--stat", test1_branch])?;
+        insta::assert_snapshot!(stdout, @r"
+        test2_will_also_contain_test1_when_reparented.txt | 1 -
+        test3_will_also_contain_test2_when_reparented.txt | 1 -
+        2 files changed, 2 deletions(-)
+        ");
+    }
+
+    // test --reparent with --exact
+    {
+        let (stdout, _stderr) = git.branchless(
+            "move",
+            &["--exact", test2_branch, "--dest", "master", "--reparent"],
+        )?;
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 40ca381 create test2_will_also_contain_test1_when_reparented.txt
+        branchless: processing 1 update: branch test2-branch
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout test3-branch --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let (stdout, _stderr) = git.run(&["show", "--pretty=format:", "--stat", test2_branch])?;
+        insta::assert_snapshot!(stdout, @r"
+        test1.txt                                         | 1 +
+        test2_will_also_contain_test1_when_reparented.txt | 1 +
+        2 files changed, 2 insertions(+)
+        ");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_move_reparent_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
 
     git.detach_head()?;
     let test1_branch = "test1-branch";
@@ -6528,7 +9150,84 @@ fn test_worktree_rebase_in_memory() -> eyre::Result<()> {
         HEAD is now at 4838e49 create test3.txt
         branchless: processing checkout
         "###);
+        insta::assert_snapshot!(stdout, @"
+        Attempting rebase in-memory...
+        [1/1] Committed as: 4838e49 create test3.txt
+        branchless: processing 1 rewritten commit
+        branchless: running command: <git-executable> checkout 4838e49b08954becdd17c0900c1179c2c654c627 --
+        In-memory rebase succeeded.
+        ");
+    }
+
+    {
+        let stdout = worktree.smartlog()?;
         insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |\
+        | o 96d1c37 create test2.txt
+        |
+        @ 4838e49 create test3.txt
+        "###);
+    }
+
+    {
+        let stdout = git.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        :
+        @ 62fc20d (> master) create test1.txt
+        |\
+        | o 96d1c37 create test2.txt
+        |
+        o 4838e49 create test3.txt
+        "###);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_worktree_rebase_in_memory_auto_print() -> eyre::Result<()> {
+    let git = make_git()?;
+
+    if !git.supports_reference_transactions()? {
+        return Ok(());
+    }
+    git.init_repo()?;
+    git.run(&["config", "branchless.smartlog.autoPrint", "true"])?;
+
+    git.commit_file("test1", 1)?;
+    git.detach_head()?;
+    git.commit_file("test2", 2)?;
+    git.commit_file("test3", 3)?;
+
+    let GitWorktreeWrapper {
+        temp_dir: _temp_dir,
+        worktree,
+    } = make_git_worktree(&git, "new-worktree")?;
+    git.run(&["checkout", "master"])?;
+    {
+        let stdout = worktree.smartlog()?;
+        insta::assert_snapshot!(stdout, @r###"
+        :
+        O 62fc20d (master) create test1.txt
+        |
+        o 96d1c37 create test2.txt
+        |
+        @ 70deb1e create test3.txt
+        "###);
+    }
+
+    {
+        let (stdout, stderr) = worktree.branchless("move", &["-s", "@", "-d", "master"])?;
+        insta::assert_snapshot!(stderr, @r###"
+        branchless: creating working copy snapshot
+        Previous HEAD position was 70deb1e create test3.txt
+        branchless: processing 1 update: ref HEAD
+        HEAD is now at 4838e49 create test3.txt
+        branchless: processing checkout
+        "###);
+        insta::assert_snapshot!(stdout, @r"
         Attempting rebase in-memory...
         [1/1] Committed as: 4838e49 create test3.txt
         branchless: processing 1 rewritten commit
@@ -6540,7 +9239,7 @@ fn test_worktree_rebase_in_memory() -> eyre::Result<()> {
         |
         @ 4838e49 create test3.txt
         In-memory rebase succeeded.
-        "###);
+        ");
     }
 
     {

@@ -38,8 +38,8 @@ use lib::git::{CategorizedReferenceName, MaybeZeroOid, NonZeroOid, ReferenceName
 
 use lib::core::effects::Effects;
 pub use lib::core::rewrite::rewrite_hooks::{
-    hook_drop_commit_if_empty, hook_post_rewrite, hook_register_extra_post_rewrite_hook,
-    hook_skip_upstream_applied_commit,
+    hook_drop_commit_if_empty, hook_post_rewrite, hook_preserve_commit_timestamps,
+    hook_register_extra_post_rewrite_hook, hook_skip_upstream_applied_commit,
 };
 
 /// Handle Git's `post-checkout` hook.
@@ -66,7 +66,7 @@ fn hook_post_checkout(
     let repo = Repo::from_current_dir()?;
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = event_log_db.make_transaction_id(now, "hook-post-checkout")?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, "hook-post-checkout")?;
     event_log_db.add_events(vec![Event::RefUpdateEvent {
         timestamp: timestamp.as_secs_f64(),
         event_tx_id,
@@ -143,7 +143,7 @@ fn hook_post_commit_common(effects: &Effects, hook_name: &str) -> eyre::Result<(
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs_f64();
 
-    let event_tx_id = event_log_db.make_transaction_id(now, hook_name)?;
+    let event_tx_id = event_log_db.make_hook_transaction_id(now, hook_name)?;
     event_log_db.add_events(vec![Event::CommitEvent {
         timestamp,
         event_tx_id,
@@ -515,7 +515,6 @@ fn hook_reference_transaction(effects: &Effects, transaction_state: &str) -> eyr
     let repo = Repo::from_current_dir()?;
     let conn = repo.get_db_conn()?;
     let event_log_db = EventLogDb::new(&conn)?;
-    let event_tx_id = event_log_db.make_transaction_id(now, "reference-transaction")?;
 
     let packed_references = read_packed_refs_file(&repo)?;
 
@@ -554,6 +553,30 @@ fn hook_reference_transaction(effects: &Effects, transaction_state: &str) -> eyr
     if parsed_lines.is_empty() {
         return Ok(());
     }
+
+    // While a Branchless rebase is paused, only the updates the rebase itself
+    // makes (`HEAD` and other pseudo-refs, `refs/rewritten/*`, and the branch
+    // being rebased) belong to its transaction. Others, such as from an
+    // unrelated `git branch scratch`, get their own transaction.
+    let rebase_head_name =
+        std::fs::read_to_string(repo.get_rebase_state_dir_path().join("head-name")).ok();
+    let is_rebase_update = parsed_lines.iter().all(
+        |ParsedReferenceTransactionLine {
+             ref_name,
+             old_value: _,
+             new_value: _,
+         }| {
+            let ref_name = ref_name.as_str();
+            !ref_name.starts_with("refs/")
+                || ref_name.starts_with("refs/rewritten/")
+                || rebase_head_name.as_deref().map(str::trim) == Some(ref_name)
+        },
+    );
+    let event_tx_id = if is_rebase_update {
+        event_log_db.make_hook_transaction_id(now, "reference-transaction")?
+    } else {
+        event_log_db.make_transaction_id(now, "reference-transaction")?
+    };
 
     let num_reference_updates = Pluralize {
         determiner: None,
@@ -659,6 +682,13 @@ pub fn command_main(ctx: CommandContext, args: HookArgs) -> EyreExitOr<()> {
 
         HookSubcommand::ReferenceTransaction { transaction_state } => {
             hook_reference_transaction(&effects, &transaction_state)?;
+        }
+
+        HookSubcommand::PreserveCommitTimestamps {
+            original_commit_oid,
+        } => {
+            let original_commit_oid: NonZeroOid = original_commit_oid.parse()?;
+            hook_preserve_commit_timestamps(original_commit_oid)?;
         }
 
         HookSubcommand::RegisterExtraPostRewriteHook => {
